@@ -33,7 +33,10 @@ def team(value):
     return {'GS':'GSW','NO':'NOP','PHO':'PHX','NY':'NYK','SA':'SAS'}.get(value, value)
 
 def key(name):
-    value = unicodedata.normalize('NFKD', name).encode('ascii','ignore').decode().lower()
+    value = unicodedata.normalize('NFKD', name).encode('ascii','ignore').decode()
+    # The official PDF can join suffixes to a surname: LivelyII, ButlerIII,
+    # JacksonJr. Keep case until these suffixes are separated/removed.
+    value = re.sub(r'(?<=[a-z])(?:Jr\.?|Sr\.?|III|II|IV)(?=\s|$)', '', value).lower()
     return re.sub('[^a-z0-9]', '', re.sub(r'\b(jr|sr|ii|iii|iv)\b\.?', '', value))
 
 def iso(value):

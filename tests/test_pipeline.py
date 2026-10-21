@@ -54,5 +54,8 @@ def test_salary_joins_require_exact_matchups_and_pending_reports_block():
 def test_identity_normalization_and_duplicate_salary_rejection():
     assert key('Nikola Jokić')=='nikolajokic'
     assert key('Gary Trent Jr.')=='garytrent'
+    assert key('Dereck LivelyII')==key('Dereck Lively II')=='derecklively'
+    assert key('Jimmy ButlerIII')==key('Jimmy Butler III')=='jimmybutler'
+    assert key('WendellJr. Carter')==key('Wendell Carter Jr.')=='wendellcarter'
     args=list(slate_inputs());args[1]+='0,Player,0,PG,10,GS,LAL,GS@LAL,10,\r\n'
     with pytest.raises(ValueError,match='identity'):make_slate(*args)
