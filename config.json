@@ -1,0 +1,7 @@
+{
+  "preferred_contests": { "2026-10-21": "15879463" },
+  "default_min_minutes": 24,
+  "default_max_rookies": 2,
+  "max_snapshot_age_minutes": 120,
+  "repository": "jimrong79/yahoo-dfs-slate-lab"
+}
