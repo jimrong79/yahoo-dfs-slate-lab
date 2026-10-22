@@ -16,6 +16,7 @@ import re
 import sys
 import unicodedata
 from zoneinfo import ZoneInfo
+from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 import pdfplumber
@@ -43,7 +44,10 @@ def iso(value):
     return value.astimezone(UTC).isoformat().replace('+00:00', 'Z')
 
 def fetch(url):
-    response = requests.get(url, timeout=(10, 30), headers={'User-Agent':'SlateLab/1.0 public NBA slate research'})
+    # DraftKings' public feeds accept the library's normal python-requests
+    # identification. No browser impersonation, session cookies, or login.
+    headers={} if urlparse(url).hostname in {'api.draftkings.com','www.draftkings.com'} else {'User-Agent':'SlateLab/1.0 public NBA slate research'}
+    response = requests.get(url, timeout=(10, 30), headers=headers)
     response.raise_for_status()
     return response
 
@@ -83,8 +87,13 @@ def parse_sportsline(html):
         raise ValueError('SportsLine has too few complete forecasts.')
     return result
 
-def parse_fuel(html, date):
+def parse_fuel(html, date, platform=None):
     soup = BeautifulSoup(html,'html.parser')
+    if platform and not re.search(r"window\.platform\s*=\s*['\"]"+re.escape(platform)+r"['\"]",html):
+        raise ValueError('Daily Fantasy Fuel platform does not match the requested scoring system.')
+    dated_rows=soup.select('tr.projections-listing[data-start_date]')
+    if dated_rows and any(r['data-start_date']!=date for r in dated_rows):
+        raise ValueError('Daily Fantasy Fuel player rows are showing another date.')
     text = soup.get_text(' ',strip=True)
     stamp = re.search(r'Updated At:\s*([A-Za-z]{3},\s*[A-Za-z]{3}\s+\d{1,2},\s*\d{4},\s*\d{1,2}:\d{2}\s*[AP]M)\s*ET',text)
     if not stamp:
@@ -249,11 +258,77 @@ def make_slate(contest, csv_text, sports, fuel, starters, injuries, coverage, da
                         'newPlayer':float(p['FPPG'])==0,'historicalAverage':float(p['FPPG'])})
     if len(players)<20:raise ValueError('Yahoo salary pool is incomplete.')
     ready=all(coverage.get(g[k])=='submitted' for g in games for k in ['away','home']) and sum(p['sourceCount']==2 for p in players)>=8
-    return {'schemaVersion':1,'id':str(contest['seriesId']),'contestId':str(contest['id']),'contestTitle':contest['title'],
+    return {'schemaVersion':1,'platform':'yahoo','id':str(contest['seriesId']),'contestId':str(contest['id']),'contestTitle':contest['title'],
+            'contestUrl':f'https://sports.yahoo.com/dailyfantasy/contest/{contest["id"]}',
             'date':date,'updatedAt':iso(now),'firstTip':iso(first),'salaryCap':200,'ready':ready,
             'readinessReason':None if ready else 'Some team injury reports or daily projections are not ready.',
             'injuryReportedAt':reported,'model':{'id':'live-consensus-v1','name':'Daily consensus','version':'1.0',
             'description':'Equal weight current SportsLine component stats converted to Yahoo scoring and Daily Fantasy Fuel FanDuel projections. Both platforms use the same NBA scoring. The private research ML model has not been promoted.',
+            'validatedProfitability':False},'sources':source_info,'games':games,'players':players}
+
+def discover_draftkings(payload, date):
+    types={t['gameTypeId']:t for t in payload['gameTypes']}
+    candidates=[]
+    for g in payload['draftGroups']:
+        kind=types.get(g['gameTypeId'],{})
+        if g.get('sportId')!=4 or kind.get('name')!='Classic' or g['contestType'].get('gameType')!='SalaryCap':continue
+        if g['gameTypeId']!=70:continue  # NBA Classic, never Tiers/Showdown/Pick6/In-Game.
+        games=g.get('games',[])
+        if len(games)<2:continue
+        if any(datetime.fromisoformat(x['startDate'].replace('Z','+00:00')).astimezone(EASTERN).date().isoformat()!=date for x in games):continue
+        candidates.append(g)
+    # Prefer the provider's Featured full Classic slate; ties use game coverage.
+    candidates.sort(key=lambda g:('Featured' not in g.get('allTags',[]),-len(g['games']),g['minStartTime'],g['draftGroupId']))
+    return candidates[0] if candidates else None
+
+def make_draftkings_slate(group,csv_text,sports,fuel,starters,injuries,coverage,date,now,reported,source_info):
+    if group['sportId']!=4 or group['gameTypeId']!=70:raise ValueError('Only DraftKings NBA Classic is supported.')
+    slots={'PG':['PG','G','UTIL'],'SG':['SG','G','UTIL'],'SF':['SF','F','UTIL'],'PF':['PF','F','UTIL'],'C':['C','UTIL']}
+    games=[]
+    for g in group['games']:
+        away,home=[team(x.strip()) for x in g['description'].split('@')]
+        tip=datetime.fromisoformat(g['startDate'].replace('Z','+00:00'))
+        if tip.astimezone(EASTERN).date().isoformat()!=date:raise ValueError('DraftKings game date is not the slate date.')
+        games.append({'id':str(g['gameId']),'away':away,'home':home,'matchup':away+'@'+home,'tipoff':iso(tip),'total':None,'spread':None})
+    if len(games)<2:raise ValueError('DraftKings Classic needs multiple games.')
+    by_matchup={g['matchup']:g for g in games}
+    reader=csv.DictReader(io.StringIO(csv_text.lstrip('\ufeff')))
+    required={'Position','Name','ID','Roster Position','Salary','Game Info','TeamAbbrev','AvgPointsPerGame'}
+    if not required.issubset(reader.fieldnames or []):raise ValueError('DraftKings salary CSV schema changed.')
+    players=[];seen=set();seen_names=set()
+    for p in reader:
+        name=p['Name'];t=team(p['TeamAbbrev']);identity=(key(name),t);pid=p['ID'];position=p['Position'];positions=position.split('/')
+        salary=int(p['Salary']); parts=p['Game Info'].split();matchup='@'.join(team(x) for x in parts[0].split('@'))
+        if len(parts)<2 or datetime.strptime(parts[1],'%m/%d/%Y').date().isoformat()!=date:raise ValueError('DraftKings salary CSV is for another date.')
+        if matchup not in by_matchup or t not in matchup.split('@'):raise ValueError('DraftKings salary matchup differs from its draft group.')
+        if pid in seen or identity in seen_names or not pid.isdigit() or not set(positions).issubset(POSITIONS) or not 3000<=salary<=50000:raise ValueError('Invalid DraftKings identity, position or salary.')
+        eligibility=set(p['Roster Position'].split('/'))
+        if eligibility!={s for pos in positions for s in slots[pos]}:raise ValueError('DraftKings roster eligibility does not match its position rules.')
+        seen.add(pid);seen_names.add(identity);opponent=next(x for x in matchup.split('@') if x!=t)
+        a,b=sports.get(identity),fuel.get(identity)
+        if a and a['matchup']!=matchup:a=None
+        if b and b['opponent']!=opponent:b=None
+        status=injuries.get(identity,'Not listed') if coverage.get(t)=='submitted' else 'Unknown'
+        flag=(p.get('Status') or '').upper()
+        if flag in {'OUT','O','IR','INJ'}:status='Out'
+        elif flag in {'D','DOUBTFUL'} and status!='Out':status='Doubtful'
+        elif flag in {'Q','GTD','QUESTIONABLE'} and status not in {'Out','Doubtful'}:status='Questionable'
+        average=float(p['AvgPointsPerGame'])
+        if not math.isfinite(average):raise ValueError('Invalid DraftKings historical average.')
+        players.append({'id':pid,'name':name,'position':position,'eligibleSlots':sorted(eligibility),'team':t,'opponent':opponent,'game':matchup,
+                        'tipoff':by_matchup[matchup]['tipoff'],'salary':salary,'projection':b['points'] if b else None,
+                        'minutes':a['minutes'] if a else None,'sourceCount':int(bool(b)),'sources':{'fuel':b['points'] if b else None},
+                        'starter':identity in starters,'starterStatus':starters.get(identity,'reserve'),'injury':status,
+                        'providerClear':bool(b) and b['badge'] not in {'O','OUT','Q','D','GTD','DTD','IR','DL'} and flag in {'','NONE','P','PROBABLE','ACTIVE'},
+                        'newPlayer':average==0,'historicalAverage':average})
+    if len(players)<20 or {p['game'] for p in players}!=set(by_matchup):raise ValueError('DraftKings salary pool is incomplete.')
+    ready=all(coverage.get(g[k])=='submitted' for g in games for k in ['away','home']) and sum(p['projection'] is not None and p['minutes'] is not None for p in players)>=8 and bool(starters)
+    return {'schemaVersion':1,'platform':'draftkings','id':f'dk-{group["draftGroupId"]}','draftGroupId':str(group['draftGroupId']),
+            'contestTitle':'DraftKings NBA Classic · Main slate','contestUrl':f'https://www.draftkings.com/lineup/draftteam?draftGroupId={group["draftGroupId"]}',
+            'date':date,'updatedAt':iso(now),'firstTip':min(g['tipoff'] for g in games),'salaryCap':50000,'ready':ready,
+            'readinessReason':None if ready else 'DraftKings salaries are available. Waiting for current minutes, starting lineups, projections, or official injury reports.',
+            'injuryReportedAt':reported,'model':{'id':'draftkings-fuel-v1','name':'DraftKings projections','version':'1.0',
+            'description':'Daily Fantasy Fuel native DraftKings fantasy points, including its bonus estimates. SportsLine supplies minutes only. No Yahoo or FanDuel fantasy totals are reused.',
             'validatedProfitability':False},'sources':source_info,'games':games,'players':players}
 
 def refresh(output, date, contest_id=None):
@@ -261,18 +336,24 @@ def refresh(output, date, contest_id=None):
     if date!=now.astimezone(EASTERN).date().isoformat():raise ValueError('Live refresh must use today’s Eastern date.')
     config=json.loads((ROOT/'config.json').read_text())
     preferred=contest_id or config['preferred_contests'].get(date)
-    lobby=fetch('https://sports.yahoo.com/dailyfantasy/contests/nba').text
-    slates=discover(lobby,date,preferred)
     output.mkdir(parents=True,exist_ok=True)
-    if not slates:
-        catalog={'schemaVersion':1,'date':date,'updatedAt':iso(now),'lastAttemptAt':iso(now),'status':'awaiting','slates':[],
-                 'message':'Today’s Yahoo NBA multi-game slates have not been found yet. Automatic checks run every 15 minutes.'}
-    else:
+    previous=json.loads((output/'catalog.json').read_text()) if (output/'catalog.json').exists() else {'slates':[]}
+    discovery_errors={};slates=[];dk=None
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        yahoo_future=executor.submit(fetch,'https://sports.yahoo.com/dailyfantasy/contests/nba')
+        dk_future=executor.submit(fetch,'https://api.draftkings.com/draftgroups/v1/')
+        try:slates=discover(yahoo_future.result().text,date,preferred)
+        except Exception as exc:discovery_errors['yahoo']=str(exc)
+        try:dk=discover_draftkings(dk_future.result().json(),date)
+        except Exception as exc:discovery_errors['draftkings']=str(exc)
+    published=[]
+    if slates or dk:
         urls={'sportsline':'https://www.sportsline.com/nba/expert-projections/simulation/',
               'fuel':f'https://www.dailyfantasyfuel.com/nba/projections/fanduel/{date}/',
+              'fuel_dk':f'https://www.dailyfantasyfuel.com/nba/projections/draftkings/{date}/',
               'starters':'https://www.rotowire.com/basketball/nba-lineups.php'}
         source_errors={}
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             futures={k:executor.submit(fetch,url) for k,url in urls.items()}
             official=executor.submit(latest_injuries,date,now)
             html={}
@@ -283,37 +364,55 @@ def refresh(output, date, contest_id=None):
             except Exception as exc:
                 injuries,coverage,reported,injury_url={},{},None,'https://official.nba.com/nba-injury-report-2026-27-season/'
                 source_errors['injuries']=str(exc)
-        sports={};fuel={};starters={};fuel_updated=None
-        for name,parser in [('sportsline',lambda h:parse_sportsline(h)),('fuel',lambda h:parse_fuel(h,date)),('starters',lambda h:parse_starters(h,date))]:
+        sports={};fuel={};fuel_dk={};starters={};fuel_updated=None;fuel_dk_updated=None
+        for name,parser in [('sportsline',parse_sportsline),('fuel',lambda h:parse_fuel(h,date,'fanduel')),('fuel_dk',lambda h:parse_fuel(h,date,'draftkings')),('starters',lambda h:parse_starters(h,date))]:
             if name not in html:continue
             try:
                 parsed=parser(html[name])
                 if name=='sportsline':sports=parsed
                 elif name=='fuel':fuel,fuel_updated=parsed
+                elif name=='fuel_dk':fuel_dk,fuel_dk_updated=parsed
                 else:starters=parsed
             except Exception as exc:source_errors[name]=str(exc)
         source_info={k:{'url':u,'capturedAt':iso(now)} for k,u in urls.items()}
         source_info['fuel']['updatedAt']=fuel_updated
+        source_info['fuel_dk']['updatedAt']=fuel_dk_updated
         source_info['sportsline']['updatedAt']=None
         source_info['injuries']={'url':injury_url,'updatedAt':reported,'capturedAt':iso(now)}
-        published=[];pending_files={}
+        def publish(slate,meta,filename):
+            (output/filename).write_text(json.dumps(slate,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n')
+            published.append({**meta,'platform':slate['platform'],'date':date,'file':filename,'ready':slate['ready'],'playerCount':len(slate['players'])})
+            print(f'Published {filename}: {len(slate["players"])} salaries, ready={slate["ready"]}',flush=True)
         for i,s in enumerate(slates):
-            contest=store(fetch(f'https://sports.yahoo.com/dailyfantasy/contest/{s["contestId"]}').text,'ContestStore')
-            if str(contest['seriesId'])!=s['seriesId']:raise ValueError('Preferred contest does not belong to today’s main slate.')
-            pool=fetch(f'https://dfyql-ro.sports.yahoo.com/v2/export/contestPlayers?contestId={s["contestId"]}').text
-            slate=make_slate(contest,pool,sports,fuel,starters,injuries,coverage,date,now,reported,source_info)
-            if source_errors or not starters:
-                slate['ready']=False
-                slate['readinessReason']='Salaries are available. Waiting for current projections, starting lineups, or official team injury reports.'
-            slate['sourceErrors']=source_errors
-            filename=f'{date}-{s["seriesId"]}.json'
-            pending_files[filename]=json.dumps(slate,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n'
-            published.append({**s,'date':date,'label':('Main slate' if i==0 else 'Late slate' if i==len(slates)-1 else 'Evening slate'),
-                              'file':filename,'ready':slate['ready'],'playerCount':len(slate['players'])})
-            print(f'Published {filename}: {len(slate["players"])} salaries, {sum(p["sourceCount"]==2 for p in slate["players"])} matched forecasts, ready={slate["ready"]}',flush=True)
-        catalog={'schemaVersion':1,'date':date,'updatedAt':iso(now),'lastAttemptAt':iso(now),'status':'ready','slates':published,
-                 'refreshIntervalMinutes':15,'repository':config['repository']}
-        for filename,content in pending_files.items():(output/filename).write_text(content)
+            try:
+                contest=store(fetch(f'https://sports.yahoo.com/dailyfantasy/contest/{s["contestId"]}').text,'ContestStore')
+                if str(contest['seriesId'])!=s['seriesId']:raise ValueError('Preferred contest does not belong to today’s main slate.')
+                pool=fetch(f'https://dfyql-ro.sports.yahoo.com/v2/export/contestPlayers?contestId={s["contestId"]}').text
+                slate=make_slate(contest,pool,sports,fuel,starters,injuries,coverage,date,now,reported,{k:v for k,v in source_info.items() if k!='fuel_dk'})
+                errors={k:v for k,v in source_errors.items() if k!='fuel_dk'}
+                if errors or not starters:
+                    slate['ready']=False
+                    slate['readinessReason']='Salaries are available. Waiting for current projections, starting lineups, or official team injury reports.'
+                slate['sourceErrors']=errors
+                publish(slate,{**s,'label':('Main slate' if i==0 else 'Late slate' if i==len(slates)-1 else 'Evening slate')},f'{date}-{s["seriesId"]}.json')
+            except Exception as exc:discovery_errors['yahoo']=str(exc)
+        if dk:
+            try:
+                csv_url=f'https://www.draftkings.com/lineup/getavailableplayerscsv?draftGroupId={dk["draftGroupId"]}'
+                info={k:v for k,v in source_info.items() if k not in {'fuel','fuel_dk'}}
+                info.update(fuel=source_info['fuel_dk'],salaries={'url':csv_url,'capturedAt':iso(now)})
+                slate=make_draftkings_slate(dk,fetch(csv_url).text,sports,fuel_dk,starters,injuries,coverage,date,now,reported,info)
+                slate['sourceErrors']={k:v for k,v in source_errors.items() if k!='fuel'}
+                if slate['sourceErrors']:slate['ready']=False
+                publish(slate,{'seriesId':slate['id'],'draftGroupId':str(dk['draftGroupId']),'gameCount':len(dk['games']),'firstTip':slate['firstTip'],'label':'Main slate'},f'{date}-dk-{dk["draftGroupId"]}.json')
+            except Exception as exc:discovery_errors['draftkings']=str(exc)
+    # Failure on one platform must not remove the other platform or make old
+    # forecasts look new. Carry its previous per-slate timestamps unchanged.
+    for old in previous.get('slates',[]):
+        if old.get('platform','yahoo') in discovery_errors and old['seriesId'] not in {s['seriesId'] for s in published} and (output/old['file']).exists():published.append(old)
+    catalog={'schemaVersion':1,'date':date,'updatedAt':iso(now),'lastAttemptAt':iso(now),'status':'partial' if discovery_errors else 'ready' if published else 'awaiting',
+             'slates':published,'platformErrors':discovery_errors,'refreshIntervalMinutes':15,'repository':config['repository'],
+             'message':'Today’s slates have not been released yet. Automatic checks run every 15 minutes.'}
     (output/'catalog.json').write_text(json.dumps(catalog,indent=2)+'\n')
     return catalog
 

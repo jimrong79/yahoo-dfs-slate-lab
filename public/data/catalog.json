@@ -1,44 +1,37 @@
 {
   "schemaVersion": 1,
-  "date": "2026-10-21",
-  "updatedAt": "2026-10-21T17:35:26.401516Z",
-  "lastAttemptAt": "2026-10-21T17:35:26.401516Z",
+  "date": "2026-10-22",
+  "updatedAt": "2026-10-22T05:56:13.234621Z",
+  "lastAttemptAt": "2026-10-22T05:56:13.234621Z",
   "status": "ready",
   "slates": [
     {
-      "seriesId": "26039",
-      "contestId": "15879463",
-      "gameCount": 11,
-      "firstTip": "2026-10-21T23:00:00Z",
-      "date": "2026-10-21",
+      "seriesId": "26096",
+      "contestId": "15882051",
+      "gameCount": 2,
+      "firstTip": "2026-10-22T23:00:00Z",
       "label": "Main slate",
-      "file": "2026-10-21-26039.json",
-      "ready": true,
-      "playerCount": 381
+      "platform": "yahoo",
+      "date": "2026-10-22",
+      "file": "2026-10-22-26096.json",
+      "ready": false,
+      "playerCount": 68
     },
     {
-      "seriesId": "26040",
-      "contestId": "15878868",
-      "gameCount": 6,
-      "firstTip": "2026-10-22T00:00:00Z",
-      "date": "2026-10-21",
-      "label": "Evening slate",
-      "file": "2026-10-21-26040.json",
-      "ready": true,
-      "playerCount": 209
-    },
-    {
-      "seriesId": "26041",
-      "contestId": "15878875",
-      "gameCount": 3,
-      "firstTip": "2026-10-22T02:00:00Z",
-      "date": "2026-10-21",
-      "label": "Late slate",
-      "file": "2026-10-21-26041.json",
-      "ready": true,
-      "playerCount": 104
+      "seriesId": "dk-155482",
+      "draftGroupId": "155482",
+      "gameCount": 2,
+      "firstTip": "2026-10-22T23:00:00Z",
+      "label": "Main slate",
+      "platform": "draftkings",
+      "date": "2026-10-22",
+      "file": "2026-10-22-dk-155482.json",
+      "ready": false,
+      "playerCount": 68
     }
   ],
+  "platformErrors": {},
   "refreshIntervalMinutes": 15,
-  "repository": "jimrong79/yahoo-dfs-slate-lab"
+  "repository": "jimrong79/yahoo-dfs-slate-lab",
+  "message": "Today\u2019s slates have not been released yet. Automatic checks run every 15 minutes."
 }

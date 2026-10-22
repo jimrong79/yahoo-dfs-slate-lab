@@ -1,12 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import {catalog,installFixtures,dk} from './fixtures.js';
 
 // Published inputs stay real; hold the browser clock just after their snapshot
 // so the same build can be checked tomorrow without bypassing expiry in the app.
-const catalog = JSON.parse(readFileSync('public/data/catalog.json','utf8'));
 const main = catalog.slates[0];
 test.beforeEach(async ({page,context}) => {
-  await page.clock.setFixedTime(new Date(Date.parse(catalog.updatedAt)+30000));
+  await installFixtures(page);
   await context.grantPermissions(['clipboard-read','clipboard-write']);
 });
 test('generate, lock, exclude, save, copy and download', async ({page}, testInfo) => {
@@ -58,6 +57,29 @@ test('stale published data disables generation with an explanation', async ({pag
   await page.clock.setFixedTime(new Date(Date.parse(catalog.updatedAt)+121*60000));
   await page.goto('./');await expect(page.locator('#notice')).toContainText('over two hours old');
   await expect(page.locator('#generate')).toBeDisabled();
+});
+test('DraftKings selection uses its own cap, scoring source and position eligibility',async({page},testInfo)=>{
+  await page.goto('./?platform=draftkings');await expect(page.locator('#slate-select')).toHaveValue('dk-123');
+  await expect(page.locator('#remaining-salary')).toHaveText('$50,000 / $50,000');
+  await expect(page.locator('#platform-pill')).toContainText('DraftKings');
+  await page.locator('[data-position="SG"]').click();await expect(page.locator('[data-player-id="902"]')).toBeVisible();
+  await page.getByRole('button',{name:'Lock Fixture Player 2',exact:true}).click();
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  await expect(page.locator('.lineup-player strong').filter({hasText:'Fixture Player 2'})).toHaveCount(1);
+  const slots=await page.locator('.lineup-row').evaluateAll(rows=>rows.map(r=>r.dataset.slot));expect(slots).toEqual(['PG','SG','SF','PF','C','G','F','UTIL']);
+  await page.locator('#copy-lineup').click();expect(await page.evaluate(()=>navigator.clipboard.readText())).toContain('DraftKings NBA');
+  await page.locator('#save-lineup').click();await page.locator('#mobile-saved').click();await expect(page.locator('.saved-card')).toContainText('DraftKings');await page.locator('#close-modal').click();
+  await page.locator('#sources-link').click();await expect(page.locator('#modal-content')).toContainText('native DraftKings');await page.locator('#close-modal').click();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+  await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:`screenshots/dk-test-${testInfo.project.name}.png`,fullPage:true});
+  await page.locator('#slate-select').selectOption(main.seriesId);await expect(page.locator('#remaining-salary')).toHaveText('$200 / $200');
+  await expect(page.locator('[data-lock][aria-pressed="true"]')).toHaveCount(0);await expect(page.locator('#roster-count')).toHaveText('0 / 8');
+});
+test('DraftKings salaries remain visible while current reports are pending',async({page})=>{
+  await page.route('**/data/2026-10-21-dk-123.json*',route=>route.fulfill({json:{...dk,ready:false,readinessReason:'Waiting for current minutes and injury reports.',players:dk.players.map(p=>({...p,minutes:null,injury:'Unknown'}))}}));
+  await page.goto('./?platform=draftkings');await expect(page.locator('#notice')).toContainText('Waiting for current minutes');
+  await expect(page.locator('#generate')).toBeDisabled();await expect(page.locator('#eligible-only')).not.toBeChecked();
+  await expect(page.locator('.player-row')).toHaveCount(dk.players.length);
 });
 test('copy remains usable when clipboard permission is denied', async ({page}) => {
   await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{value:{writeText:()=>Promise.reject(new Error('Permission denied'))}});});

@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#163d32" />
-  <meta name="description" content="A personal Yahoo NBA lineup workbench with current salaries, transparent daily projections, and a one-click lineup generator." />
-  <title>Slate Lab — Yahoo NBA Lineup Builder</title>
+  <meta name="description" content="A personal Yahoo and DraftKings NBA lineup workbench with current salaries, transparent daily projections, and a one-click lineup generator." />
+  <title>Slate Lab — Yahoo &amp; DraftKings NBA Lineups</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
 </head>
 <body>
@@ -19,13 +19,13 @@
         <button class="nav-item" id="method-nav"><i data-lucide="chart-no-axes-combined"></i>Our projections</button>
       </nav>
       <div class="sidebar-note"><span class="note-icon"><i data-lucide="sparkles"></i></span><strong>A little more clarity.<br>A better starting five.</strong><p>Current salaries. Visible assumptions. Your decisions.</p></div>
-      <div class="sidebar-bottom"><span class="mini-ball">◉</span><div><strong>Yahoo NBA</strong><small>8 players · $200 salary cap</small></div><span class="version">v1</span></div>
+      <div class="sidebar-bottom"><span class="mini-ball">◉</span><div><strong id="sidebar-platform">NBA Daily Fantasy</strong><small id="sidebar-cap">Yahoo · DraftKings</small></div><span class="version">v1</span></div>
     </aside>
     <div class="workspace">
       <header class="topbar"><div class="breadcrumb"><span>Workspace</span><i data-lucide="chevron-right"></i><strong>Lineup builder</strong></div><div class="topbar-right"><span class="live-dot"></span><span id="top-status">Loading slate</span><button class="icon-button" id="mobile-saved" aria-label="View saved lineups"><i data-lucide="bookmark"></i></button><button class="icon-button" id="help-button" aria-label="How Slate Lab works"><i data-lucide="circle-help"></i></button><span class="profile-mark">J</span></div></header>
       <main>
         <div class="page-heading"><div><div class="eyebrow">NBA · DAILY FANTASY</div><h1>Build your next lineup<span>.</span></h1><p>A clearer view of the slate. A lineup that fits your game.</p></div><button class="button secondary refresh-button" id="refresh"><i data-lucide="refresh-cw"></i>Refresh data</button></div>
-        <div class="slate-toolbar"><div class="slate-select-wrap"><i data-lucide="calendar-days"></i><select id="slate-select" aria-label="Choose slate"><option>Loading today’s slates…</option></select><i data-lucide="chevron-down"></i></div><span class="source-pill"><span class="yahoo-logo">y!</span>Yahoo</span><span class="date-label" id="date-label"></span><div class="freshness" id="freshness"><span class="live-dot"></span>Checking latest snapshot</div></div>
+        <div class="slate-toolbar"><div class="slate-select-wrap"><i data-lucide="calendar-days"></i><select id="slate-select" aria-label="Choose slate"><option>Loading today’s slates…</option></select><i data-lucide="chevron-down"></i></div><span class="source-pill" id="platform-pill"><span class="yahoo-logo">y!</span>Yahoo</span><span class="date-label" id="date-label"></span><div class="freshness" id="freshness"><span class="live-dot"></span>Checking latest snapshot</div></div>
         <div id="notice" class="notice" role="status" hidden></div>
         <section class="games-section" aria-label="Games in selected slate"><div class="section-kicker"><span id="game-count">TODAY’S MATCHUPS</span><span>ALL TIMES PACIFIC</span></div><div class="games-strip" id="games-strip"></div></section>
         <div class="builder-grid">
@@ -47,7 +47,7 @@
             <div class="lineup-actions"><button class="button secondary small" id="copy-lineup" disabled><i data-lucide="copy"></i>Copy</button><button class="button secondary small" id="download-lineup" disabled><i data-lucide="download"></i>CSV</button><button class="button secondary small" id="save-lineup" disabled><i data-lucide="bookmark"></i>Save</button></div>
           </aside>
         </div>
-        <footer class="page-footer"><span><span class="live-dot"></span><span id="footer-update">Automatic updates every 15 minutes</span></span><span>Daily consensus v1 <span class="divider">/</span> For your own research <span class="divider">/</span><a id="yahoo-link" href="https://sports.yahoo.com/dailyfantasy/contests/nba" target="_blank" rel="noopener">Open Yahoo <i data-lucide="arrow-up-right"></i></a></span></footer>
+        <footer class="page-footer"><span><span class="live-dot"></span><span id="footer-update">Automatic updates every 15 minutes</span></span><span><span id="model-label">Daily projections</span> <span class="divider">/</span> For your own research <span class="divider">/</span><a id="yahoo-link" href="https://sports.yahoo.com/dailyfantasy/contests/nba" target="_blank" rel="noopener">Open Yahoo <i data-lucide="arrow-up-right"></i></a></span></footer>
       </main>
     </div>
   </div>

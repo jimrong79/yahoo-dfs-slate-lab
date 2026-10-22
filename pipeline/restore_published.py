@@ -23,7 +23,7 @@ def main():
         snapshots={}
         for item in catalog['slates']:
             filename=item['file']
-            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}-\d+\.json',filename):raise ValueError('Invalid public filename')
+            if not re.fullmatch(r'\d{4}-\d{2}-\d{2}-(?:dk-)?\d+\.json',filename):raise ValueError('Invalid public filename')
             snapshot=download(filename)
             if snapshot.get('id')!=item['seriesId']:raise ValueError('Public snapshot identity mismatch')
             snapshots[filename]=snapshot
