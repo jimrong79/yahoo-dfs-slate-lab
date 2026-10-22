@@ -88,3 +88,17 @@ test('copy remains usable when clipboard permission is denied', async ({page}) =
   await page.locator('#copy-lineup').click();
   await expect(page.getByRole('textbox',{name:'Lineup to copy'})).toHaveValue(/Slate Lab.*Yahoo NBA/s);
 });
+test('two-game defaults apply and preserve explicit user settings across refreshes',async({page})=>{
+  await page.goto('./?platform=draftkings');
+  await expect(page.locator('#build-rules')).toContainText('Include bench · 16+');
+  await page.locator('#settings-button').click();
+  await expect(page.locator('#setting-minutes')).toHaveValue('16');
+  await expect(page.locator('#setting-starters')).not.toBeChecked();
+  await page.locator('#setting-minutes').selectOption('24');
+  await page.locator('#setting-starters').check();
+  await page.locator('#apply-settings').click();
+  await page.locator('#refresh').click();
+  await expect(page.locator('#build-rules')).toContainText('Starters · 24+');
+  await page.locator('#slate-select').selectOption(main.seriesId);
+  await expect(page.locator('#build-rules')).toContainText('Starters · 24+');
+});

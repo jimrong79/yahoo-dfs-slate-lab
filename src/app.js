@@ -2,6 +2,7 @@ import './style.css';
 import { createIcons, LayoutDashboard, Bookmark, ChartNoAxesCombined, Sparkles, ChevronRight, CircleHelp, RefreshCw, CalendarDays, ChevronDown, SlidersHorizontal, Search, LockKeyhole, Ban, Info, ArrowUpRight, ShieldCheck, WandSparkles, ArrowRight, Copy, Download, X, Check } from 'lucide';
 import { playerProblem, slateProblem } from './optimizer.js';
 import { platformRules, money } from './platforms.js';
+import { defaultBuildSettings } from './build-settings.js';
 
 const icons = { LayoutDashboard, Bookmark, ChartNoAxesCombined, Sparkles, ChevronRight, CircleHelp, RefreshCw, CalendarDays, ChevronDown, SlidersHorizontal, Search, LockKeyhole, Ban, Info, ArrowUpRight, ShieldCheck, WandSparkles, ArrowRight, Copy, Download, X, Check };
 const $ = id => document.getElementById(id);
@@ -12,7 +13,7 @@ const number = value => Number.isFinite(value) ? value.toFixed(1) : '—';
 const time = value => new Date(value).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' });
 const dateLabel = value => new Date(`${value}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' });
 const readSaved = () => { try { const data = JSON.parse(localStorage.getItem('slatelab-lineups-v1') || '[]'); return Array.isArray(data) ? data.slice(0, 30) : []; } catch { return []; } };
-const state = { catalog: null, slate: null, loading: false, busy: false, locked: new Set(), excluded: new Set(), result: null, game: 'ALL', position: 'ALL', sort: 'projection', direction: -1, settings: { minMinutes: 24, startersOnly: true, maxNewPlayers: 2 } };
+const state = { catalog: null, slate: null, loading: false, busy: false, locked: new Set(), excluded: new Set(), result: null, game: 'ALL', position: 'ALL', sort: 'projection', direction: -1, settings: defaultBuildSettings(), settingsCustomized: false };
 let toastTimer, worker, workerTimer, generation = 0, loadGeneration = 0;
 const rules = () => platformRules(state.slate);
 const problemForPlayer = p => playerProblem(p, state.settings, rules().id);
@@ -89,6 +90,7 @@ async function loadData(id = state.slate?.id) {
     const changed = state.slate?.id !== slate.id || state.slate?.date !== slate.date;
     state.slate = slate; $('slate-select').value = slate.id;
     if (changed) { state.locked.clear(); state.excluded.clear(); state.game = state.position = 'ALL'; $('search').value=''; }
+    if (!state.settingsCustomized) state.settings = defaultBuildSettings(slate);
     if (!slate.players.some(p=>!problemForPlayer(p))) $('eligible-only').checked=false;
     $('date-label').textContent = dateLabel(slate.date);
     const platform=rules(); $('app').dataset.platform=platform.id;
@@ -165,7 +167,13 @@ async function generate() {
     if (latestProblem) throw new Error(latestProblem);
     state.result = result; renderLineup();
     message(`8 players · ${new Set(result.lineup.map(p => p.team)).size} teams · Check starters again before tipoff.`);
-  } catch (error) { if (run === generation) message(error.message, true); }
+  } catch (error) {
+    if (run === generation) {
+      const hint = /No legal lineup|Not enough eligible|Include players from at least/.test(error.message) && snapshot.games?.length === 2 && (state.settings.startersOnly || state.settings.minMinutes > 16)
+        ? ' For this two-game slate, open Settings, include bench players, and set the minutes minimum to 16.' : '';
+      message(error.message + hint, true);
+    }
+  }
   finally { if (run === generation) { clearTimeout(workerTimer); worker?.terminate(); worker = null; state.busy = false; updateStatus(); } }
 }
 function method() {
@@ -179,7 +187,8 @@ function method() {
   const poolRule=dk ? 'A native DraftKings forecast and current projected minutes are required. Multiple listed positions are supported, with each player selected only once. At least two different games must be represented.' : 'Both current forecast sources are required. At least three different teams must be represented.';
   showModal('A transparent starting point', `<p>${description}</p><p>${scoring} Value means fantasy points per ${dk ? '$1,000' : '$1'} of salary.</p>
     <p>The old private ML model is not used. Profitability has not been validated. This builds one lineup with a high projected total; it does not model ownership or tournament payout risk.</p>
-    <h3>Who can enter a lineup?</h3><p>Defaults: projected starters, 24+ projected minutes, and no unresolved injury flag. Official team injury reports must be submitted. ${poolRule}</p>
+    <h3>Who can enter a lineup?</h3><p>Players must meet your minutes and starter filters and have no unresolved injury flag. Official team injury reports must be submitted. ${poolRule}</p>
+    <p>Two-game slates default to including healthy bench players with 16+ projected minutes, so cheaper rotation players can fit the budget. Larger slates default to starters with 24+ minutes. Your custom settings are kept when switching slates.</p>
     <p>“NEW” means the selected platform’s historical average is zero, including rookies or missing history. At most two are selected by default. Eight players and a ${money(platform.salaryCap)} cap are enforced.</p>
     <p>Game chips, positions, and search filter the table only. Locks, exclusions, and Settings affect generation. Switching slates clears locks and exclusions.</p>
     <h3>Freshness and lineup locks</h3><p>Checks run every 15 minutes and can be delayed. Refresh data reloads the latest published snapshot. Salaries can arrive before forecasts, minutes, or injury reports. Generation stops if the snapshot is over two hours old, the injury report is over three hours old, or the slate has started. Existing entries and late swaps are not managed.</p>
@@ -191,6 +200,7 @@ function openSettings() {
   showModal('Build settings', `<div class="setting-row"><label for="setting-minutes">Minimum projected minutes<small>Minutes come from SportsLine’s current forecast.</small></label><select id="setting-minutes">${[0,16,20,24,28,30,32].map(n => `<option value="${n}" ${n === state.settings.minMinutes ? 'selected' : ''}>${n}+ min</option>`).join('')}</select></div><div class="setting-row"><label for="setting-starters">Projected starters only<small>Turn off to consider healthy bench players.</small></label><input id="setting-starters" type="checkbox" ${state.settings.startersOnly ? 'checked' : ''}></div><div class="setting-row"><label for="setting-new">Maximum new players<small>“New” means this platform has a zero historical average, including rookies and missing history.</small></label><select id="setting-new">${[0,1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${n === state.settings.maxNewPlayers ? 'selected' : ''}>${n}</option>`).join('')}</select></div><button id="apply-settings" class="button generate">Apply settings</button>`);
   $('apply-settings').onclick = () => {
     state.settings = { minMinutes: +$('setting-minutes').value, startersOnly: $('setting-starters').checked, maxNewPlayers: +$('setting-new').value };
+    state.settingsCustomized = true;
     $('modal').close(); invalidate(); renderPool();
   };
 }

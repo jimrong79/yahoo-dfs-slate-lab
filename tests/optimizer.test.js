@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateLineup, validateLineup, slateProblem, playerProblem, assignSlots } from '../src/optimizer.js';
+import { defaultBuildSettings } from '../src/build-settings.js';
 
 const now = Date.parse('2026-10-21T17:30:00Z');
 function fixture() {
@@ -55,4 +56,18 @@ test('duplicate identities and invalid settings fail before solving', () => {
   const slate=fixture(); slate.players[1].id='0';
   assert.throws(()=>generateLineup(slate,{},now),/Duplicate/);
   assert.throws(()=>generateLineup(fixture(),{maxNewPlayers:-1},now),/Invalid build settings/);
+});
+test('two-game defaults admit affordable rotation players without relaxing injury checks', () => {
+  const slate=fixture();slate.games=[{id:'a'},{id:'b'}];
+  slate.players.forEach(p=>{p.salary=35;});
+  const bench=slate.players.map(p=>({...p,id:`bench-${p.id}`,name:`Bench ${p.id}`,salary:12,minutes:18,starter:false,projection:15}));
+  bench[0].injury='Questionable';bench[0].projection=1000;
+  slate.players.push(...bench);
+  const strict=defaultBuildSettings({games:[{},{},{}]});
+  assert.throws(()=>generateLineup(slate,strict,now),/cheapest eight players.*\$280.*\$200/);
+  const settings=defaultBuildSettings(slate),result=generateLineup(slate,settings,now);
+  assert.equal(validateLineup(result.lineup,settings),true);
+  assert.ok(result.lineup.some(p=>!p.starter));
+  assert.ok(result.lineup.every(p=>p.injury!=='Questionable'&&p.minutes>=16));
+  assert.throws(()=>generateLineup(slate,strict,now),/No legal lineup/);
 });

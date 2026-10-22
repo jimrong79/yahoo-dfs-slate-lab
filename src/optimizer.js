@@ -80,6 +80,10 @@ export function generateLineup(slate, settings = {}, now = Date.now()) {
   const candidates = slate.players.filter(p => !excluded.has(p.id) && !playerProblem(p, settings, rules.id));
   if (new Set(slate.players.map(p => p.id)).size !== slate.players.length) throw new Error('Duplicate player IDs in the published slate.');
   if (candidates.length < 8) throw new Error('Not enough eligible players. Lower the minutes minimum or include bench players.');
+  const lockedSalary = candidates.filter(p => locked.has(p.id)).reduce((sum,p) => sum+p.salary,0);
+  const cheapestRemaining = candidates.filter(p => !locked.has(p.id)).map(p => p.salary).sort((a,b) => a-b).slice(0,8-locked.size);
+  const minimumSalary = lockedSalary + cheapestRemaining.reduce((sum,salary) => sum+salary,0);
+  if (minimumSalary > rules.salaryCap) throw new Error(`No legal lineup fits: even the cheapest eight players allowed by your filters and locks cost ${money(minimumSalary)}, above the ${money(rules.salaryCap)} cap. Include bench players or lower the minutes minimum.`);
   const teams = [...new Set(candidates.map(p => p.team))].sort();
   if (teams.length < rules.minTeams) throw new Error(`Include players from at least ${rules.minTeams} teams.`);
   if (rules.id === 'draftkings') return generateDraftKings(candidates, settings, now);
