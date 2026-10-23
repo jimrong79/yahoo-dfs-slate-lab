@@ -263,7 +263,7 @@ def make_slate(contest, csv_text, sports, fuel, starters, injuries, coverage, da
             'date':date,'updatedAt':iso(now),'firstTip':iso(first),'salaryCap':200,'ready':ready,
             'readinessReason':None if ready else 'Some team injury reports or daily projections are not ready.',
             'injuryReportedAt':reported,'model':{'id':'live-consensus-v1','name':'Daily consensus','version':'1.0',
-            'description':'Equal weight current SportsLine component stats converted to Yahoo scoring and Daily Fantasy Fuel FanDuel projections. Both platforms use the same NBA scoring. The private research ML model has not been promoted.',
+            'description':'Equal weight current SportsLine component stats converted to Yahoo scoring and Daily Fantasy Fuel FanDuel projections. Both platforms use the same NBA scoring. Optional private-model predictions are supplied in a separate dated export.',
             'validatedProfitability':False},'sources':source_info,'games':games,'players':players}
 
 def discover_draftkings(payload, date):

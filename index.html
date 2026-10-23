@@ -27,6 +27,8 @@
         <div class="page-heading"><div><div class="eyebrow">NBA · DAILY FANTASY</div><h1>Build your next lineup<span>.</span></h1><p>A clearer view of the slate. A lineup that fits your game.</p></div><button class="button secondary refresh-button" id="refresh"><i data-lucide="refresh-cw"></i>Refresh data</button></div>
         <div class="slate-toolbar"><div class="slate-select-wrap"><i data-lucide="calendar-days"></i><select id="slate-select" aria-label="Choose slate"><option>Loading today’s slates…</option></select><i data-lucide="chevron-down"></i></div><span class="source-pill" id="platform-pill"><span class="yahoo-logo">y!</span>Yahoo</span><span class="date-label" id="date-label"></span><div class="freshness" id="freshness"><span class="live-dot"></span>Checking latest snapshot</div></div>
         <div id="notice" class="notice" role="status" hidden></div>
+        <div id="snapshot-help" class="snapshot-help" hidden>Refresh data reloads the published snapshot. To fetch new data, <a href="https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/pages.yml" target="_blank" rel="noopener">open the refresh workflow</a>, choose Run workflow, wait for its green check, then refresh here.</div>
+        <div id="projection-controls" class="projection-controls" hidden><label for="projection-select">Build using <select id="projection-select"><option value="consensus">50/50 consensus (default)</option><option value="trained">Trained model (experimental)</option></select></label><span id="projection-status"></span></div>
         <section class="games-section" aria-label="Games in selected slate"><div class="section-kicker"><span id="game-count">TODAY’S MATCHUPS</span><span>ALL TIMES PACIFIC</span></div><div class="games-strip" id="games-strip"></div></section>
         <div class="builder-grid">
           <section class="pool-panel card">
@@ -40,6 +42,7 @@
             <div class="lineup-heading"><div><span class="section-kicker">YOUR BUILD</span><h2>Lineup studio</h2></div><span class="roster-count" id="roster-count">0 / 8</span></div>
             <div class="lineup-metrics"><div><small>SALARY REMAINING</small><strong id="remaining-salary">$200<span> / $200</span></strong></div><div><small>PROJECTED POINTS</small><strong id="projected-total">—<span> FPTS</span></strong></div></div>
             <div class="budget-track"><span id="budget-fill"></span></div>
+            <p id="projection-comparison" class="projection-comparison" hidden></p>
             <div id="lineup-rows" class="lineup-rows"></div>
             <div class="build-rules" id="build-rules"><i data-lucide="shield-check"></i><span>Starters · 24+ min · Max 2 new players</span></div>
             <button class="button generate" id="generate" disabled><i data-lucide="wand-sparkles"></i>Generate lineup<i data-lucide="arrow-right"></i></button>

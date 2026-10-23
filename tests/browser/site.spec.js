@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import {catalog,installFixtures,dk} from './fixtures.js';
+import {catalog,installFixtures,dk,yahoo} from './fixtures.js';
+import {modelFixture} from '../model-fixture.js';
 
 // Published inputs stay real; hold the browser clock just after their snapshot
 // so the same build can be checked tomorrow without bypassing expiry in the app.
@@ -57,6 +58,8 @@ test('stale published data disables generation with an explanation', async ({pag
   await page.clock.setFixedTime(new Date(Date.parse(catalog.updatedAt)+121*60000));
   await page.goto('./');await expect(page.locator('#notice')).toContainText('over two hours old');
   await expect(page.locator('#generate')).toBeDisabled();
+  await expect(page.locator('#snapshot-help')).toContainText('Run workflow');
+  await expect(page.locator('#snapshot-help a')).toHaveAttribute('href',/actions\/workflows\/pages.yml/);
 });
 test('DraftKings selection uses its own cap, scoring source and position eligibility',async({page},testInfo)=>{
   await page.goto('./?platform=draftkings');await expect(page.locator('#slate-select')).toHaveValue('dk-123');
@@ -101,4 +104,29 @@ test('two-game defaults apply and preserve explicit user settings across refresh
   await expect(page.locator('#build-rules')).toContainText('Starters · 24+');
   await page.locator('#slate-select').selectOption(main.seriesId);
   await expect(page.locator('#build-rules')).toContainText('Starters · 24+');
+});
+test('trained model is optional, compares totals and labels saved lineups and exports',async({page},testInfo)=>{
+  await page.route('**/data/ml-*.json*',route=>route.fulfill({json:modelFixture(yahoo)}));
+  await page.goto('./?platform=yahoo');
+  await expect(page.locator('#projection-select')).toHaveValue('consensus');
+  await expect(page.locator('#projection-status')).toContainText('Model trained through');
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  await expect(page.locator('#projection-comparison')).toContainText('50/50');
+  await page.locator('#projection-select').selectOption('trained');
+  await expect(page.locator('#roster-count')).toHaveText('0 / 8');
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  await expect(page.locator('#model-label')).toContainText('Trained model');
+  await page.locator('#copy-lineup').click();expect(await page.evaluate(()=>navigator.clipboard.readText())).toContain('Trained model (experimental)');
+  await page.locator('#save-lineup').click();await page.locator('#mobile-saved').click();
+  await expect(page.locator('.saved-card')).toContainText('Trained model');await page.locator('#close-modal').click();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+  await page.screenshot({path:`screenshots/model-comparison-${testInfo.project.name}.png`,fullPage:true});
+});
+test('unpublished model explains the limitation and leaves consensus usable',async({page})=>{
+  await page.goto('./?platform=yahoo');await expect(page.locator('#generate')).toBeEnabled();
+  await page.locator('#projection-select').selectOption('trained');
+  await expect(page.locator('#generate')).toBeDisabled();
+  await expect(page.locator('#notice')).toContainText('No trained-model snapshot');
+  await page.locator('#projection-select').selectOption('consensus');
+  await expect(page.locator('#generate')).toBeEnabled();
 });

@@ -1,5 +1,6 @@
 import solver from 'javascript-lp-solver';
 import { platformRules, eligibleSlots, money, YAHOO_SLOTS, ELIGIBILITY } from './platforms.js';
+import { trainedProblem } from './projections.js';
 
 export const SLOTS = YAHOO_SLOTS;
 export { ELIGIBILITY };
@@ -17,11 +18,14 @@ export function slateProblem(slate, now = Date.now()) {
   if (now >= Date.parse(slate.firstTip)) return 'This slate has started. Choose a later slate; existing-entry late swaps are not supported in v1.';
   if (!slate.ready) return slate.readinessReason || 'Current projections or injury reports are not ready.';
   if (!Number.isFinite(Date.parse(slate.injuryReportedAt)) || now - Date.parse(slate.injuryReportedAt) > 180 * 60000 || Date.parse(slate.injuryReportedAt) > now + 5 * 60000) return 'The official injury report needs a refresh.';
+  if (slate.projectionMethod === 'trained') return trainedProblem(slate, slate.trainedSnapshot, now) || slate.trainedProblem;
   return null;
 }
 export function playerProblem(p, settings = {}, platform = 'yahoo') {
   const rules = platformRules(platform);
-  if (!Number.isFinite(p.projection) || p.projection <= 0 || p.sourceCount < rules.projectionSources) return rules.id === 'yahoo' ? 'Awaiting both projection sources' : 'Awaiting a DraftKings projection';
+  if (p.projectionMethod === 'trained') {
+    if (rules.id !== 'yahoo' || !p.modelAvailable || !Number.isFinite(p.projection) || p.projection <= 0) return 'Awaiting a matching trained-model prediction';
+  } else if (!Number.isFinite(p.projection) || p.projection <= 0 || p.sourceCount < rules.projectionSources) return rules.id === 'yahoo' ? 'Awaiting both projection sources' : 'Awaiting a DraftKings projection';
   if (['Out', 'Doubtful', 'Questionable', 'Unknown'].includes(p.injury)) return p.injury === 'Unknown' ? 'Team injury report not submitted' : p.injury;
   if (!['Not listed', 'Available', 'Probable'].includes(p.injury)) return 'Unknown injury status';
   if (!p.providerClear) return 'Unresolved provider injury flag';

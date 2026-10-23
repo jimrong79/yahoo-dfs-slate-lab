@@ -12,6 +12,7 @@ export async function installFixtures(page){
   await page.clock.setFixedTime(new Date(Date.parse(catalog.updatedAt)+30000));
   await page.route('**/data/*.json*',async route=>{
     const filename=new URL(route.request().url()).pathname.split('/').at(-1);
+    if(filename.startsWith('ml-')){await route.fulfill({status:404,body:'Not published'});return;}
     const data=filename==='catalog.json'?catalog:snapshots.find(s=>`${s.date}-${s.id}.json`===filename);
     if(data)await route.fulfill({json:data});else await route.continue();
   });

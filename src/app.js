@@ -3,6 +3,7 @@ import { createIcons, LayoutDashboard, Bookmark, ChartNoAxesCombined, Sparkles, 
 import { playerProblem, slateProblem } from './optimizer.js';
 import { platformRules, money } from './platforms.js';
 import { defaultBuildSettings } from './build-settings.js';
+import { selectProjection, projectionLabel, comparisonTotals } from './projections.js';
 
 const icons = { LayoutDashboard, Bookmark, ChartNoAxesCombined, Sparkles, ChevronRight, CircleHelp, RefreshCw, CalendarDays, ChevronDown, SlidersHorizontal, Search, LockKeyhole, Ban, Info, ArrowUpRight, ShieldCheck, WandSparkles, ArrowRight, Copy, Download, X, Check };
 const $ = id => document.getElementById(id);
@@ -14,6 +15,7 @@ const time = value => new Date(value).toLocaleTimeString('en-US', { timeZone: 'A
 const dateLabel = value => new Date(`${value}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' });
 const readSaved = () => { try { const data = JSON.parse(localStorage.getItem('slatelab-lineups-v1') || '[]'); return Array.isArray(data) ? data.slice(0, 30) : []; } catch { return []; } };
 const state = { catalog: null, slate: null, loading: false, busy: false, locked: new Set(), excluded: new Set(), result: null, game: 'ALL', position: 'ALL', sort: 'projection', direction: -1, settings: defaultBuildSettings(), settingsCustomized: false };
+Object.assign(state, {baseSlate:null,modelSnapshot:null,projectionMethod:'consensus'});
 let toastTimer, worker, workerTimer, generation = 0, loadGeneration = 0;
 const rules = () => platformRules(state.slate);
 const problemForPlayer = p => playerProblem(p, state.settings, rules().id);
@@ -38,10 +40,23 @@ function showModal(title, html) {
   drawIcons();
 }
 function updateStatus() {
+  if (state.baseSlate) state.slate = selectProjection(state.baseSlate, state.modelSnapshot, state.projectionMethod);
   const problem = slateProblem(state.slate);
   const failed = state.catalog?.status === 'refresh_failed' || state.catalog?.platformErrors?.[rules().id];
   const warning = problem || (failed ? 'The last automatic refresh failed. Showing the previous snapshot; check its time before using it.' : '');
   $('notice').hidden = !warning; $('notice').textContent = warning; $('notice').classList.toggle('error', !!problem);
+  $('snapshot-help').hidden = !(/snapshot|official injury report|automatic refresh/.test(warning) && !/trained-model/.test(warning));
+  const yahoo = state.slate && rules().id === 'yahoo';
+  $('projection-controls').hidden = !yahoo;
+  $('projection-select').disabled = state.loading;
+  $('projection-select').value = state.projectionMethod;
+  if (yahoo) {
+    const ml = state.modelSnapshot;
+    const unavailable = state.slate.trainedProblem;
+    $('projection-status').textContent = unavailable || `Model trained through ${ml.trainedThrough} · Inputs ${time(ml.inputsAt)} PT · ${state.slate.players.filter(p=>p.modelAvailable).length}/${state.slate.players.length} players matched`;
+    $('projection-status').title = 'Model snapshots are generated privately. The public refresh workflow updates consensus data only.';
+  }
+  $('model-label').textContent = state.slate?.model?.name || 'Daily projections';
   $('generate').disabled = !!problem || state.loading || state.busy;
   $('generate').innerHTML = state.busy ? `${icon('refresh-cw')}Building your lineup…` : `${icon('wand-sparkles')}Generate lineup${icon('arrow-right')}`;
   if (state.busy) $('generate').querySelector('i')?.classList.add('spin');
@@ -59,10 +74,11 @@ function updateStatus() {
 function invalidateResultOnly(problem) {
   state.result = null; renderLineup(); message(problem, true);
 }
-async function getData(file) {
-  if (!/^(catalog|\d{4}-\d{2}-\d{2}-(?:dk-)?\d+)\.json$/.test(file)) throw new Error('Invalid published data path.');
+async function getData(file, optional = false) {
+  if (!/^(catalog|ml-\d{4}-\d{2}-\d{2}|\d{4}-\d{2}-\d{2}-(?:dk-)?\d+)\.json$/.test(file)) throw new Error('Invalid published data path.');
   const url = new URL(`data/${file}`, document.baseURI); url.searchParams.set('v', Date.now());
   const response = await fetch(url, { cache: 'no-store' });
+  if (optional && response.status === 404) return null;
   if (!response.ok) throw new Error(`Published data is unavailable (${response.status}). Try Refresh data in a moment.`);
   return response.json();
 }
@@ -78,17 +94,19 @@ async function loadData(id = state.slate?.id) {
     const preferred = new URL(location.href).searchParams.get('platform');
     const selected = catalog.slates.find(s => s.seriesId === id) || catalog.slates.find(s => (s.platform || 'yahoo') === preferred && Date.parse(s.firstTip) > Date.now()) || catalog.slates.find(s => Date.parse(s.firstTip) > Date.now()) || catalog.slates[0];
     if (!selected) {
-      state.slate = null; renderGames(); renderPool();
+      state.slate = state.baseSlate = null; renderGames(); renderPool();
       $('date-label').textContent = dateLabel(catalog.date);
       $('freshness').textContent = 'Waiting for today’s slates';
       message(catalog.message || 'Today’s data is not ready. Scheduled checks continue automatically.');
       return;
     }
-    const slate = await getData(selected.file);
+    const [slate,modelSnapshot] = await Promise.all([getData(selected.file),
+      platformRules(selected).id === 'yahoo' ? getData(`ml-${selected.date}.json`,true).catch(()=>null) : Promise.resolve(null)]);
     if (request !== loadGeneration) return;
     if (slate.schemaVersion !== 1 || slate.id !== selected.seriesId || !Array.isArray(slate.players) || !Array.isArray(slate.games) || platformRules(slate).id !== platformRules(selected).id || slate.salaryCap !== platformRules(slate).salaryCap) throw new Error('Slate data could not be validated.');
     const changed = state.slate?.id !== slate.id || state.slate?.date !== slate.date;
-    state.slate = slate; $('slate-select').value = slate.id;
+    state.baseSlate = slate; state.modelSnapshot = modelSnapshot;
+    state.slate = selectProjection(slate,modelSnapshot,state.projectionMethod); $('slate-select').value = slate.id;
     if (changed) { state.locked.clear(); state.excluded.clear(); state.game = state.position = 'ALL'; $('search').value=''; }
     if (!state.settingsCustomized) state.settings = defaultBuildSettings(slate);
     if (!slate.players.some(p=>!problemForPlayer(p))) $('eligible-only').checked=false;
@@ -102,9 +120,9 @@ async function loadData(id = state.slate?.id) {
     $('yahoo-link').innerHTML=`Open ${platform.name} ${icon('arrow-up-right')}`;
     const url=new URL(location.href);url.searchParams.set('platform',platform.id);history.replaceState(null,'',url);
     renderGames(); renderPool(); renderLineup();
-    message(slateProblem(slate) || 'Ready when you are. Review your lineup before entering.', !!slateProblem(slate));
+    message(slateProblem(state.slate) || 'Ready when you are. Review your lineup before entering.', !!slateProblem(state.slate));
   } catch (error) {
-    state.slate = null; renderGames(); renderPool(); renderLineup();
+    state.slate = state.baseSlate = null; renderGames(); renderPool(); renderLineup();
     message(error.message, true); $('freshness').textContent = 'Data could not be loaded';
     $('notice').hidden = false; $('notice').textContent = error.message;
   } finally {
@@ -128,8 +146,9 @@ function renderPool() {
   $('position-tabs').innerHTML = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'].map(pos => `<button data-position="${pos}" class="${state.position === pos ? 'active' : ''}" aria-pressed="${state.position === pos}">${pos === 'ALL' ? 'All' : pos}</button>`).join('');
   $('players-body').innerHTML = filtered.length ? filtered.map(p => {
     const locked = state.locked.has(p.id), excluded = state.excluded.has(p.id), problem = problemForPlayer(p);
+    const comparison = rules().id === 'yahoo' ? `<small class="alt-projection">${state.projectionMethod === 'trained' ? '50/50 ' + number(p.consensusProjection) : 'ML ' + number(p.modelProjection)}</small>` : '';
     const shortStatus = ['Out','Doubtful','Questionable','Unknown'].includes(p.injury) ? p.injury : '';
-    return `<tr class="player-row ${locked ? 'locked' : ''} ${excluded ? 'excluded' : ''}" data-player-id="${esc(p.id)}" title="${esc(problem || `${p.starterStatus} starter · ${p.injury}`)}"><td><button class="row-action ${locked ? 'locked' : ''}" data-lock="${esc(p.id)}" aria-label="${locked ? 'Unlock' : 'Lock'} ${esc(p.name)}" aria-pressed="${locked}" ${problem && !locked ? 'disabled' : ''}>${icon('lock-keyhole')}</button></td><td class="player-cell"><div class="player-wrap"><span class="player-avatar">${esc(p.name.split(' ').map(w => w[0]).slice(0,2).join(''))}</span><div><div class="player-name">${esc(p.name)} ${p.newPlayer ? '<span class="new-badge" title="Platform historical average is zero; may be a rookie or missing history">NEW</span>' : ''}${shortStatus ? `<span class="status-badge">${esc(shortStatus)}</span>` : ''}</div><div class="player-meta"><b>${esc(p.team)}</b> vs ${esc(p.opponent)} · ${time(p.tipoff)}</div></div></div></td><td><span class="pos-tag">${esc(p.position)}</span></td><td class="salary-cell">${money(p.salary)}</td><td>${number(p.minutes)}</td><td class="projection-cell" title="${rules().id === 'draftkings' ? 'Fuel DraftKings: ' + number(p.sources.fuel) : 'SportsLine: ' + number(p.sources.sportsline) + ' · Fuel: ' + number(p.sources.fuel)}">${number(p.projection)}</td><td class="value-cell ${valueForPlayer(p) >= (rules().id === 'draftkings' ? 5 : 1.3) ? 'good' : ''}">${Number.isFinite(p.projection) ? valueForPlayer(p).toFixed(2) + '×' : '—'}</td><td><button class="row-action ${excluded ? 'excluded' : ''}" data-exclude="${esc(p.id)}" aria-label="${excluded ? 'Include' : 'Exclude'} ${esc(p.name)}" aria-pressed="${excluded}">${icon('ban')}</button></td></tr>`;
+    return `<tr class="player-row ${locked ? 'locked' : ''} ${excluded ? 'excluded' : ''}" data-player-id="${esc(p.id)}" title="${esc(problem || `${p.starterStatus} starter · ${p.injury}`)}"><td><button class="row-action ${locked ? 'locked' : ''}" data-lock="${esc(p.id)}" aria-label="${locked ? 'Unlock' : 'Lock'} ${esc(p.name)}" aria-pressed="${locked}" ${problem && !locked ? 'disabled' : ''}>${icon('lock-keyhole')}</button></td><td class="player-cell"><div class="player-wrap"><span class="player-avatar">${esc(p.name.split(' ').map(w => w[0]).slice(0,2).join(''))}</span><div><div class="player-name">${esc(p.name)} ${p.newPlayer ? '<span class="new-badge" title="Platform historical average is zero; may be a rookie or missing history">NEW</span>' : ''}${shortStatus ? `<span class="status-badge">${esc(shortStatus)}</span>` : ''}</div><div class="player-meta"><b>${esc(p.team)}</b> vs ${esc(p.opponent)} · ${time(p.tipoff)}</div></div></div></td><td><span class="pos-tag">${esc(p.position)}</span></td><td class="salary-cell">${money(p.salary)}</td><td>${number(p.minutes)}</td><td class="projection-cell" title="${rules().id === 'draftkings' ? 'Fuel DraftKings: ' + number(p.sources.fuel) : 'SportsLine: ' + number(p.sources.sportsline) + ' · Fuel: ' + number(p.sources.fuel)}">${number(p.projection)}${comparison}</td><td class="value-cell ${valueForPlayer(p) >= (rules().id === 'draftkings' ? 5 : 1.3) ? 'good' : ''}">${Number.isFinite(p.projection) ? valueForPlayer(p).toFixed(2) + '×' : '—'}</td><td><button class="row-action ${excluded ? 'excluded' : ''}" data-exclude="${esc(p.id)}" aria-label="${excluded ? 'Include' : 'Exclude'} ${esc(p.name)}" aria-pressed="${excluded}">${icon('ban')}</button></td></tr>`;
   }).join('') : '<tr><td colspan="8" class="table-empty">No players match these filters. Try another position or turn off “Eligible only.”</td></tr>';
   document.querySelectorAll('[data-sort]').forEach(button => { button.textContent = `${{salary:'SALARY',minutes:'MIN',projection:'PROJ',value:'VALUE'}[button.dataset.sort]}${state.sort === button.dataset.sort ? state.direction < 0 ? ' ↓' : ' ↑' : ''}`; });
   document.querySelector('[data-sort="value"]').title=rules().id==='draftkings'?'Projected fantasy points per $1,000 salary':'Projected fantasy points per $1 salary';
@@ -137,6 +156,11 @@ function renderPool() {
 }
 function renderLineup() {
   const result = state.result, platform=rules();
+  $('projection-comparison').hidden = !result || platform.id !== 'yahoo';
+  if (result && platform.id === 'yahoo') {
+    const totals = comparisonTotals(result.lineup);
+    $('projection-comparison').textContent = `This lineup: 50/50 ${number(totals.consensus)} · Trained ${number(totals.trained)} FPTS`;
+  }
   $('roster-count').textContent = `${result ? 8 : 0} / 8`;
   $('remaining-salary').innerHTML = `${money(platform.salaryCap - (result?.salary || 0))}<span> / ${money(platform.salaryCap)}</span>`;
   $('projected-total').innerHTML = `${result ? result.projection.toFixed(1) : '—'}<span> FPTS</span>`;
@@ -165,7 +189,7 @@ async function generate() {
     if (run !== generation) return;
     const latestProblem = slateProblem(snapshot);
     if (latestProblem) throw new Error(latestProblem);
-    state.result = result; renderLineup();
+    state.result = {...result,projectionMethod:snapshot.projectionMethod,modelName:snapshot.model?.name,modelInputsAt:snapshot.trainedSnapshot?.inputsAt}; renderLineup();
     message(`8 players · ${new Set(result.lineup.map(p => p.team)).size} teams · Check starters again before tipoff.`);
   } catch (error) {
     if (run === generation) {
@@ -186,7 +210,8 @@ function method() {
     : 'Points + 1.2 × rebounds + 1.5 × assists + 3 × steals + 3 × blocks − turnovers.';
   const poolRule=dk ? 'A native DraftKings forecast and current projected minutes are required. Multiple listed positions are supported, with each player selected only once. At least two different games must be represented.' : 'Both current forecast sources are required. At least three different teams must be represented.';
   showModal('A transparent starting point', `<p>${description}</p><p>${scoring} Value means fantasy points per ${dk ? '$1,000' : '$1'} of salary.</p>
-    <p>The old private ML model is not used. Profitability has not been validated. This builds one lineup with a high projected total; it does not model ownership or tournament payout risk.</p>
+    <p>${dk ? '' : 'Yahoo defaults to the 50/50 consensus. The optional trained model uses the private Yahoo fit with current starter overrides. Only its derived predictions are published; the model and training data stay private. The same SportsLine minutes filters and injury checks apply to both methods for comparison. Missing model predictions are excluded, never filled with consensus values.'} Profitability has not been validated. This builds one lineup with a high projected total; it does not model ownership or tournament payout risk.</p>
+    <p>${dk ? '' : 'The trained model is experimental. A higher forecast from one method does not establish better accuracy. Model inputs expire after two hours; changes to a team’s player pool, injuries, or starters invalidate predictions for that matchup. A new private export is required to refresh them. The public refresh workflow does not run or retrain the private model.'}</p>
     <h3>Who can enter a lineup?</h3><p>Players must meet your minutes and starter filters and have no unresolved injury flag. Official team injury reports must be submitted. ${poolRule}</p>
     <p>Two-game slates default to including healthy bench players with 16+ projected minutes, so cheaper rotation players can fit the budget. Larger slates default to starters with 24+ minutes. Your custom settings are kept when switching slates.</p>
     <p>“NEW” means the selected platform’s historical average is zero, including rookies or missing history. At most two are selected by default. Eight players and a ${money(platform.salaryCap)} cap are enforced.</p>
@@ -206,7 +231,8 @@ function openSettings() {
 }
 function lineupText(result, slate) {
   const platform=platformRules(slate);
-  return `Slate Lab · ${platform.name} NBA · ${slate.date}\n${result.lineup.map(p => `${p.slot}: ${p.name} (${p.team}) ${money(p.salary)}`).join('\n')}\nSalary: ${money(result.salary)}/${money(platform.salaryCap)} · Projection: ${result.projection.toFixed(2)}\nReview starters and injury news before entering.`;
+  const totals = comparisonTotals(result.lineup);
+  return `Slate Lab · ${platform.name} NBA · ${slate.date}\nMethod: ${result.modelName || slate.model?.name || 'Daily projections'}\n${result.lineup.map(p => `${p.slot}: ${p.name} (${p.team}) ${money(p.salary)}`).join('\n')}\nSalary: ${money(result.salary)}/${money(platform.salaryCap)} · Projection: ${result.projection.toFixed(2)}${platform.id === 'yahoo' ? `\nSame lineup: 50/50 ${number(totals.consensus)} · Trained ${number(totals.trained)}` : ''}\nReview starters and injury news before entering.`;
 }
 async function copyResult(result = state.result, slate = state.slate) {
   if (!result) return;
@@ -217,7 +243,7 @@ async function copyResult(result = state.result, slate = state.slate) {
 function downloadResult() {
   if (!state.result) return;
   const cell = value => `"${String(value).replace(/"/g,'""')}"`;
-  const rows = [['Slot','Player',`${rules().name} ID`,'Team','Position','Salary','Projection','Slate date','Snapshot time'], ...state.result.lineup.map(p => [p.slot,p.name,p.id,p.team,p.position,p.salary,p.projection,state.slate.date,state.slate.updatedAt])];
+  const rows = [['Slot','Player',`${rules().name} ID`,'Team','Position','Salary','Projection','Slate date','Snapshot time','Method','50/50 points','Trained points','Model inputs time'], ...state.result.lineup.map(p => [p.slot,p.name,p.id,p.team,p.position,p.salary,p.projection,state.slate.date,state.slate.updatedAt,state.result.modelName,p.consensusProjection ?? '',p.modelProjection ?? '',state.result.modelInputsAt ?? ''])];
   const url = URL.createObjectURL(new Blob([rows.map(row => row.map(cell).join(',')).join('\r\n')], { type:'text/csv;charset=utf-8' }));
   const link = document.createElement('a'); link.href = url; link.download = `slatelab-${rules().id}-${state.slate.date}-${state.slate.id}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast(`Review CSV downloaded — enter these players on ${rules().name}`);
@@ -232,7 +258,7 @@ function saveResult() {
 }
 function savedLineups() {
   const saved = readSaved();
-  showModal('Saved lineups', `<p>Stored only in this browser. Saved lineups are historical records and are not refreshed automatically.</p>${saved.length ? saved.map((s,i) => `<div class="saved-card"><strong>${platformRules(s).name} · ${esc(s.date)} · ${money(s.salary)} · ${number(s.projection)} FPTS</strong><p>${esc(s.lineup.map(p => p.name).join(' · '))}</p><button class="button secondary small" data-saved-copy="${i}">${icon('copy')}Copy</button> <button class="button secondary small" data-saved-delete="${i}">Delete</button></div>`).join('') : '<p>No saved lineups yet. Generate one, then select Save.</p>'}`);
+  showModal('Saved lineups', `<p>Stored only in this browser. Saved lineups are historical records and are not refreshed automatically.</p>${saved.length ? saved.map((s,i) => `<div class="saved-card"><strong>${platformRules(s).name} · ${esc(s.date)} · ${money(s.salary)} · ${number(s.projection)} FPTS</strong><small>${esc(s.modelName || 'Daily projections')}</small><p>${esc(s.lineup.map(p => p.name).join(' · '))}</p><button class="button secondary small" data-saved-copy="${i}">${icon('copy')}Copy</button> <button class="button secondary small" data-saved-delete="${i}">Delete</button></div>`).join('') : '<p>No saved lineups yet. Generate one, then select Save.</p>'}`);
   $('modal-content').onclick = event => {
     const copy = event.target.closest('[data-saved-copy]'), remove = event.target.closest('[data-saved-delete]');
     if (copy) copyResult(saved[+copy.dataset.savedCopy], saved[+copy.dataset.savedCopy]);
@@ -242,6 +268,12 @@ function savedLineups() {
 
 $('refresh').onclick = () => loadData();
 $('slate-select').onchange = event => loadData(event.target.value);
+$('projection-select').onchange = event => {
+  state.projectionMethod = event.target.value;
+  state.slate = selectProjection(state.baseSlate,state.modelSnapshot,state.projectionMethod);
+  invalidate(`${projectionLabel(state.projectionMethod)} selected. Generate a new lineup.`);
+  renderPool();
+};
 $('generate').onclick = generate;
 $('settings-button').onclick = openSettings;
 ['method-nav','sources-link','help-button'].forEach(id => { $(id).onclick = method; });
@@ -266,6 +298,6 @@ $('player-table').onclick = event => {
 };
 $('reset-pool').onclick = () => { state.position = state.game = 'ALL'; $('search').value = ''; $('eligible-only').checked = true; state.locked.clear(); state.excluded.clear(); invalidate('Filters, locks, and exclusions reset.'); renderGames(); renderPool(); };
 $('copy-lineup').onclick = () => copyResult(); $('download-lineup').onclick = downloadResult; $('save-lineup').onclick = saveResult;
-setInterval(updateStatus, 30000);
+setInterval(() => { updateStatus(); renderPool(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) updateStatus(); });
 renderLineup(); updateSavedCount(); drawIcons(); loadData();
