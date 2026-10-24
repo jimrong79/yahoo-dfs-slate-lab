@@ -1,5 +1,5 @@
 // Only derived daily predictions are public. The trained models stay private.
-export const projectionLabel = method => ({trained:'Trained model (experimental)',combined:'Combined',consensus:'50/50 consensus'}[method] || 'Daily projections');
+export const projectionLabel = method => ({provider:'Fuel DraftKings (original)',trained:'Trained model (experimental)',combined:'Combined',consensus:'50/50 consensus'}[method] || 'Daily projections');
 export const sourceLabel = source => ({consensus:'50/50',sportsline:'SportsLine',fuel:'Fuel',model:'Trained model',unavailable:'Unavailable'}[source] || 'Unavailable');
 const forecast = value => Number.isFinite(value) && value >= 0;
 const validMinutes = value => Number.isFinite(value) && value >= 0 && value <= 48;
@@ -11,9 +11,10 @@ export function teamContext(players, team) {
 }
 
 export function trainedProblem(slate, snapshot, now = Date.now()) {
-  if ((slate?.platform || 'yahoo') !== 'yahoo') return 'The trained model currently supports Yahoo only.';
+  const platform = slate?.platform || 'yahoo';
+  if (!['yahoo','draftkings'].includes(platform)) return 'Unsupported trained-model platform.';
   if (!snapshot) return 'No trained-model snapshot is published for this date.';
-  if (snapshot.schemaVersion !== 1 || snapshot.platform !== 'yahoo' || snapshot.date !== slate.date || !Array.isArray(snapshot.players)) return 'The trained-model snapshot does not match this slate.';
+  if (snapshot.schemaVersion !== 1 || snapshot.platform !== platform || snapshot.date !== slate.date || !Array.isArray(snapshot.players)) return 'The trained-model snapshot does not match this slate or scoring platform.';
   if (snapshot.players.some(p => !p || typeof p.id !== 'string' || !Number.isFinite(p.points) || !Number.isFinite(p.minutes))) return 'The trained-model player data is invalid.';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshot.trainedThrough || '') || snapshot.trainedThrough >= slate.date || !/^\d{4}-\d{2}-\d{2}$/.test(snapshot.historyThrough || '') || snapshot.historyThrough >= slate.date) return 'The trained-model history cutoff is invalid.';
   const captured = Date.parse(snapshot.inputsAt), generated = Date.parse(snapshot.generatedAt);
@@ -23,9 +24,10 @@ export function trainedProblem(slate, snapshot, now = Date.now()) {
   return null;
 }
 
-export function selectProjection(slate, snapshot, method = 'consensus', now = Date.now()) {
+export function selectProjection(slate, snapshot, method, now = Date.now()) {
   if (!slate) return null;
-  if ((slate.platform || 'yahoo') !== 'yahoo') return {...slate, projectionMethod:'provider'};
+  const platform=slate.platform || 'yahoo';
+  method ??= platform === 'draftkings' ? 'provider' : 'consensus';
   const problem = trainedProblem(slate, snapshot, now);
   const predictions = new Map(problem ? [] : snapshot.players.map(p => [p.id,p]));
   const context = Object.fromEntries([...new Set(slate.players.map(p => p.team))].map(t => [t,teamContext(slate.players,t)]));
@@ -34,7 +36,7 @@ export function selectProjection(slate, snapshot, method = 'consensus', now = Da
     const matches = prediction && prediction.team === p.team && prediction.opponent === p.opponent && prediction.game === p.game && prediction.tipoff === p.tipoff && snapshot.teamContexts?.[p.team] === context[p.team] && snapshot.teamContexts?.[p.opponent] === context[p.opponent];
     const modelAvailable = !!matches && Number.isFinite(prediction.points) && prediction.points >= 0 && Number.isFinite(prediction.minutes) && prediction.minutes >= 0 && prediction.minutes <= 48;
     const modelProjection = modelAvailable ? prediction.points : null;
-    const consensusProjection = Object.hasOwn(p,'consensusProjection') ? p.consensusProjection : p.projection;
+    const consensusProjection = Object.hasOwn(p,'consensusProjection') ? p.consensusProjection : platform === 'draftkings' ? forecast(p.sources?.sportsline) && forecast(p.sources?.fuel) ? (p.sources.sportsline+p.sources.fuel)/2 : null : p.projection;
     const sportslineMinutes = Object.hasOwn(p,'sportslineMinutes') ? p.sportslineMinutes : p.minutes;
     const modelMinutes = modelAvailable ? prediction.minutes : null;
     const sportsline = forecast(p.sources?.sportsline) ? p.sources.sportsline : null;
@@ -43,23 +45,24 @@ export function selectProjection(slate, snapshot, method = 'consensus', now = Da
     // with a more optimistic model prediction.
     const combinedSource = sportsline !== null && fuel !== null ? 'consensus' : sportsline !== null ? 'sportsline' : fuel !== null ? 'fuel' : modelAvailable ? 'model' : 'unavailable';
     const combinedProjection = combinedSource === 'consensus' ? forecast(consensusProjection) ? consensusProjection : Math.round((sportsline+fuel)/2*1000)/1000 : sportsline ?? fuel ?? modelProjection;
-    const useModelMinutes = method === 'combined' && (combinedSource === 'model' || !validMinutes(sportslineMinutes));
+    const useModelMinutes = (method === 'combined' && (combinedSource === 'model' || !validMinutes(sportslineMinutes))) || (platform === 'draftkings' && method === 'trained');
     const minutes = useModelMinutes ? modelMinutes : sportslineMinutes;
     return {...p, consensusProjection, combinedProjection, combinedSource, modelProjection, modelMinutes, sportslineMinutes,
       modelAvailable, projectionMethod:method,
-      projectionSource:method === 'combined' ? combinedSource : method === 'trained' ? modelAvailable ? 'model' : 'unavailable' : forecast(consensusProjection) ? 'consensus' : 'unavailable',
+      projectionSource:method === 'provider' ? fuel !== null ? 'fuel' : 'unavailable' : method === 'combined' ? combinedSource : method === 'trained' ? modelAvailable ? 'model' : 'unavailable' : forecast(consensusProjection) ? 'consensus' : 'unavailable',
       minutes, minutesSource:validMinutes(minutes) ? useModelMinutes ? 'model' : 'sportsline' : 'unavailable',
-      projection:method === 'trained' ? modelProjection : method === 'combined' ? combinedProjection : consensusProjection};
+      projection:method === 'provider' ? fuel : method === 'trained' ? modelProjection : method === 'combined' ? combinedProjection : consensusProjection};
   });
   const coverageProblem = !problem && players.filter(p => p.modelAvailable).length < 8 ? 'Trained-model predictions no longer match the current player pool, injuries, or starters. A new private-model export is needed.' : null;
   const combinedReady = slate.combinedReady ?? slate.ready;
   const enoughCombined = players.filter(p=>forecast(p.combinedProjection) && p.combinedProjection > 0).length >= 8;
+  const consensusReady=slate.consensusReady ?? (slate.ready && players.filter(p=>forecast(p.consensusProjection)).length>=8);
+  const readiness=method === 'combined' ? combinedReady && enoughCombined : platform === 'draftkings' && method === 'trained' ? combinedReady : method === 'consensus' ? consensusReady : slate.ready;
   return {...slate,players,projectionMethod:method,trainedSnapshot:snapshot,
-    combinedReady,
-    ready:method === 'combined' ? combinedReady && enoughCombined : slate.ready,
-    readinessReason:method === 'combined' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughCombined ? 'Combined needs at least eight current forecasts from providers or a fresh trained-model export.' : null : slate.readinessReason,
+    combinedReady,consensusReady,ready:readiness,
+    readinessReason:method === 'combined' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughCombined ? 'Combined needs at least eight current forecasts from providers or a fresh trained-model export.' : null : method === 'consensus' && !consensusReady ? slate.readinessReason || 'Waiting for both current projection sources.' : slate.readinessReason,
     modelFallbackProblem:problem, trainedProblem:problem || coverageProblem,
-    model:method === 'trained' || method === 'combined' ? {id:method === 'trained' ? 'private-yahoo-v8' : 'combined-yahoo-v1',name:projectionLabel(method)} : slate.model};
+    model:{id:`${platform}-${method}`,name:projectionLabel(method)}};
 }
 
 // A Combined lineup may depend on the model for points OR for minutes. Expiry

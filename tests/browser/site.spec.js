@@ -86,6 +86,44 @@ test('DraftKings salaries remain visible while current reports are pending',asyn
   await expect(page.locator('#generate')).toBeDisabled();await expect(page.locator('#eligible-only')).not.toBeChecked();
   await expect(page.locator('.player-row')).toHaveCount(dk.players.length);
 });
+test('DraftKings 50/50 and Combined use native forecasts and a separate DK model',async({page},testInfo)=>{
+  const native=structuredClone(dk);
+  native.combinedReady=native.consensusReady=true;
+  native.players.forEach(p=>{p.sources.sportsline=p.sources.fuel+8;p.sourceCount=2;p.providerFlagsClear=true;});
+  const chosen=generateLineup(native,{},Date.parse(dk.updatedAt)+30000).lineup.slice(0,3).map(p=>p.id);
+  const fixture=combinedFixture(native,chosen);
+  await page.route(`**/data/${dk.date}-${dk.id}.json*`,route=>route.fulfill({json:fixture.slate}));
+  await page.route(`**/data/ml-draftkings-${dk.date}.json*`,route=>route.fulfill({json:fixture.model}));
+  await page.goto('./?platform=draftkings');
+  await expect(page.locator('#projection-select')).toHaveValue('provider');
+  await page.locator('#projection-select').selectOption('consensus');
+  const both=native.players.find(p=>!chosen.includes(p.id));
+  await expect(page.locator(`[data-player-id="${both.id}"] .projection-cell`)).toContainText((both.projection+4).toFixed(1));
+  await page.locator('#projection-select').selectOption('combined');
+  for(const [i,label] of ['SportsLine','Fuel','Trained model'].entries()) {
+    const row=page.locator(`[data-player-id="${chosen[i]}"]`);
+    await expect(row.locator('.projection-cell .alt-projection')).toHaveText(label);
+    await row.locator('[data-lock]').click();
+  }
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  const remaining=await page.locator('#remaining-salary').innerText();
+  expect(Number(remaining.split('/')[0].replace(/[^0-9]/g,''))).toBeGreaterThanOrEqual(0);
+  await page.locator('#copy-lineup').click();
+  const copied=await page.evaluate(()=>navigator.clipboard.readText());
+  for(const text of ['DraftKings NBA','Method: Combined','Trained model','Fuel','SportsLine']) expect(copied).toContain(text);
+  const downloadPromise=page.waitForEvent('download');await page.locator('#download-lineup').click();
+  const csv=readFileSync(await (await downloadPromise).path(),'utf8');
+  expect(csv).toContain('"DraftKings ID"');expect(csv).toContain('"Trained model"');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+  await page.screenshot({path:`screenshots/dk-combined-${testInfo.project.name}.png`,fullPage:true});
+  await page.locator('#slate-select').selectOption(main.seriesId);
+  await expect(page.locator('#projection-select')).toHaveValue('consensus');
+  await page.locator('#slate-select').selectOption(dk.id);
+  await expect(page.locator('#projection-select')).toHaveValue('combined');
+  await page.locator('#projection-select').selectOption('trained');
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  await expect(page.locator('#model-label')).toContainText('Trained model');
+});
 test('copy remains usable when clipboard permission is denied', async ({page}) => {
   await page.addInitScript(()=>{Object.defineProperty(navigator,'clipboard',{value:{writeText:()=>Promise.reject(new Error('Permission denied'))}});});
   await page.goto('./');await expect(page.locator('#generate')).toBeEnabled();

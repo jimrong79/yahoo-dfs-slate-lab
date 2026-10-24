@@ -1,22 +1,10 @@
 {
   "schemaVersion": 1,
   "date": "2026-10-24",
-  "updatedAt": "2026-10-24T04:56:25.355065Z",
-  "lastAttemptAt": "2026-10-24T04:56:25.355065Z",
-  "status": "partial",
+  "updatedAt": "2026-10-24T08:50:15.805278Z",
+  "lastAttemptAt": "2026-10-24T08:50:15.805278Z",
+  "status": "ready",
   "slates": [
-    {
-      "seriesId": "dk-155576",
-      "draftGroupId": "155576",
-      "gameCount": 5,
-      "firstTip": "2026-10-24T23:30:00Z",
-      "label": "Main slate",
-      "platform": "draftkings",
-      "date": "2026-10-24",
-      "file": "2026-10-24-dk-155576.json",
-      "ready": false,
-      "playerCount": 175
-    },
     {
       "seriesId": "26060",
       "contestId": "15888966",
@@ -28,11 +16,21 @@
       "file": "2026-10-24-26060.json",
       "ready": false,
       "playerCount": 280
+    },
+    {
+      "seriesId": "dk-155576",
+      "draftGroupId": "155576",
+      "gameCount": 5,
+      "firstTip": "2026-10-24T23:30:00Z",
+      "label": "Main slate",
+      "platform": "draftkings",
+      "date": "2026-10-24",
+      "file": "2026-10-24-dk-155576.json",
+      "ready": false,
+      "playerCount": 175
     }
   ],
-  "platformErrors": {
-    "yahoo": "Yahoo player matchup does not match the contest schedule."
-  },
+  "platformErrors": {},
   "refreshIntervalMinutes": 15,
   "repository": "jimrong79/yahoo-dfs-slate-lab",
   "message": "Today\u2019s slates have not been released yet. Automatic checks run every 15 minutes."

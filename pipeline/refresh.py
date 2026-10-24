@@ -38,7 +38,9 @@ def key(name):
     # The official PDF can join suffixes to a surname: LivelyII, ButlerIII,
     # JacksonJr. Keep case until these suffixes are separated/removed.
     value = re.sub(r'(?<=[a-z])(?:Jr\.?|Sr\.?|III|II|IV)(?=\s|$)', '', value).lower()
-    return re.sub('[^a-z0-9]', '', re.sub(r'\b(jr|sr|ii|iii|iv)\b\.?', '', value))
+    value = re.sub('[^a-z0-9]', '', re.sub(r'\b(jr|sr|ii|iii|iv)\b\.?', '', value))
+    # Both names resolve to NBA player 1642259. DK uses the full first name.
+    return {'alexandresarr':'alexsarr'}.get(value, value)
 
 def iso(value):
     return value.astimezone(UTC).isoformat().replace('+00:00', 'Z')
@@ -83,6 +85,13 @@ def parse_sportsline(html):
             raise ValueError('Duplicate SportsLine player identity.')
         result[identity] = {'points':sum(stats[k]*w for k,w in STAT_WEIGHTS.items()),'minutes':minutes,
                             'matchup':'@'.join(team(t) for t in p['GAME'].split('@'))}
+        # The provider's native DK mean includes its simulated bonus outcomes.
+        # Never substitute FP/FD or threshold bonuses from mean component stats.
+        try:
+            dk_points = float(p.get('DK', ''))
+        except (TypeError, ValueError):
+            dk_points = None
+        result[identity]['draftkings_points'] = dk_points if dk_points is not None and math.isfinite(dk_points) and dk_points >= 0 else None
     if len(result) < 8:
         raise ValueError('SportsLine has too few complete forecasts.')
     return result
@@ -319,20 +328,28 @@ def make_draftkings_slate(group,csv_text,sports,fuel,starters,injuries,coverage,
         elif flag in {'Q','GTD','QUESTIONABLE'} and status not in {'Out','Doubtful'}:status='Questionable'
         average=float(p['AvgPointsPerGame'])
         if not math.isfinite(average):raise ValueError('Invalid DraftKings historical average.')
+        dk_points=a.get('draftkings_points') if a else None
+        consensus=(dk_points+b['points'])/2 if dk_points is not None and b else None
         players.append({'id':pid,'name':name,'position':position,'eligibleSlots':sorted(eligibility),'team':t,'opponent':opponent,'game':matchup,
                         'tipoff':by_matchup[matchup]['tipoff'],'salary':salary,'projection':b['points'] if b else None,
-                        'minutes':a['minutes'] if a else None,'sourceCount':int(bool(b)),'sources':{'fuel':b['points'] if b else None},
+                        'consensusProjection':round(consensus,3) if consensus is not None else None,
+                        'minutes':a['minutes'] if a else None,'sourceCount':int(bool(b))+int(dk_points is not None),'sources':{'sportsline':dk_points,'fuel':b['points'] if b else None},
                         'starter':identity in starters,'starterStatus':starters.get(identity,'reserve'),'injury':status,
                         'providerClear':bool(b) and b['badge'] not in {'O','OUT','Q','D','GTD','DTD','IR','DL'} and flag in {'','NONE','P','PROBABLE','ACTIVE'},
+                        'providerFlagsClear':flag in {'','NONE','P','PROBABLE','ACTIVE'} and (not b or b['badge'] in {'','P','PROBABLE'}),
                         'newPlayer':average==0,'historicalAverage':average})
     if len(players)<20 or {p['game'] for p in players}!=set(by_matchup):raise ValueError('DraftKings salary pool is incomplete.')
     ready=all(coverage.get(g[k])=='submitted' for g in games for k in ['away','home']) and sum(p['projection'] is not None and p['minutes'] is not None for p in players)>=8 and bool(starters)
+    combined_ready=all(coverage.get(g[k])=='submitted' for g in games for k in ['away','home']) and bool(starters)
+    consensus_ready=combined_ready and sum(p['consensusProjection'] is not None and p['minutes'] is not None for p in players)>=8
     return {'schemaVersion':1,'platform':'draftkings','id':f'dk-{group["draftGroupId"]}','draftGroupId':str(group['draftGroupId']),
             'contestTitle':'DraftKings NBA Classic · Main slate','contestUrl':f'https://www.draftkings.com/lineup/draftteam?draftGroupId={group["draftGroupId"]}',
             'date':date,'updatedAt':iso(now),'firstTip':min(g['tipoff'] for g in games),'salaryCap':50000,'ready':ready,
             'readinessReason':None if ready else 'DraftKings salaries are available. Waiting for current minutes, starting lineups, projections, or official injury reports.',
+            'consensusReady':consensus_ready,'combinedReady':combined_ready,
+            'combinedReadinessReason':None if combined_ready else 'Waiting for current starting lineups or official team injury reports.',
             'injuryReportedAt':reported,'model':{'id':'draftkings-fuel-v1','name':'DraftKings projections','version':'1.0',
-            'description':'Daily Fantasy Fuel native DraftKings fantasy points, including its bonus estimates. SportsLine supplies minutes only. No Yahoo or FanDuel fantasy totals are reused.',
+            'description':'Original Fuel forecast, optional 50/50 with SportsLine native DK means, or Combined with fresh private DK predictions. Both providers supply DraftKings bonus estimates.',
             'validatedProfitability':False},'sources':source_info,'games':games,'players':players}
 
 def refresh(output, date, contest_id=None):
@@ -411,6 +428,8 @@ def refresh(output, date, contest_id=None):
                 slate=make_draftkings_slate(dk,fetch(csv_url).text,sports,fuel_dk,starters,injuries,coverage,date,now,reported,info)
                 slate['sourceErrors']={k:v for k,v in source_errors.items() if k!='fuel'}
                 if slate['sourceErrors']:slate['ready']=False
+                if slate['sourceErrors']:slate['consensusReady']=False
+                if any(k in slate['sourceErrors'] for k in ('injuries','starters')):slate['combinedReady']=False
                 publish(slate,{'seriesId':slate['id'],'draftGroupId':str(dk['draftGroupId']),'gameCount':len(dk['games']),'firstTip':slate['firstTip'],'label':'Main slate'},f'{date}-dk-{dk["draftGroupId"]}.json')
             except Exception as exc:discovery_errors['draftkings']=str(exc)
     # Failure on one platform must not remove the other platform or make old

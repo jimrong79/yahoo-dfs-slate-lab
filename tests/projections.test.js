@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {selectProjection,trainedProblem,comparisonTotals,lineupModelProblem} from '../src/projections.js';
 import {generateLineup,slateProblem,playerProblem} from '../src/optimizer.js';
 import {modelFixture,combinedFixture} from './model-fixture.js';
+import {draftKingsFixture} from './draftkings-fixture.js';
 
 const slate=JSON.parse(readFileSync('public/data/2026-10-21-26039.json','utf8'));
 const now=Date.parse(slate.updatedAt)+30000;
@@ -46,7 +47,7 @@ test('model identity, dates, duplicate records and wrong platform fail closed',(
   }
   const wrong=structuredClone(model);wrong.players[0].team='WRONG';
   assert.equal(selectProjection(slate,wrong,'trained',now).players[0].projection,null);
-  assert.match(trainedProblem({...slate,platform:'draftkings'},model,now),/Yahoo only/);
+  assert.match(trainedProblem({...slate,platform:'draftkings'},model,now),/scoring platform/);
 });
 test('missing comparison values do not masquerade as zero totals',()=>{
   assert.deepEqual(comparisonTotals([{consensusProjection:20,modelProjection:null}]),{consensus:20,trained:null});
@@ -114,11 +115,47 @@ test('Combined can build during a projection outage but not with missing injury 
   for (const injury of ['Out','Questionable','Unknown']) assert.ok(playerProblem({...selected.players.find(p=>!playerProblem(p)),injury}));
   assert.match(playerProblem({...selected.players.find(p=>!playerProblem(p)),providerFlagsClear:false}),/injury flag/);
 });
-test('Combined rejects model points and minutes when matchup news changes; DraftKings stays native',()=>{
+test('Combined rejects model points and minutes when matchup news changes',()=>{
   const {slate:base,model}=combinedFixture(slate,fallbackIds);
   const player=base.players.find(p=>p.id===fallbackIds[2]);player.starter=!player.starter;
   const selected=selectProjection(base,model,'combined',now).players.find(p=>p.id===player.id);
   assert.equal(selected.projection,null);assert.equal(selected.minutes,null);
-  const dk={...slate,platform:'draftkings'};
-  assert.deepEqual(selectProjection(dk,model,'combined',now).players,dk.players);
+});
+
+test('DraftKings keeps original Fuel default and averages only native provider forecasts',()=>{
+  const dk=draftKingsFixture(), stamp=Date.parse(dk.updatedAt)+30000;
+  dk.players.forEach(p=>{p.sources.sportsline=p.sources.fuel+10;p.sourceCount=2;});
+  const original=selectProjection(dk,null,undefined,stamp);
+  assert.equal(original.projectionMethod,'provider');
+  assert.deepEqual(original.players.map(p=>p.projection),dk.players.map(p=>p.projection));
+  const consensus=selectProjection(dk,null,'consensus',stamp);
+  assert.ok(consensus.players.every(p=>p.projection===p.sources.fuel+5));
+  const result=generateLineup(consensus,{},stamp);
+  assert.equal(result.lineup.length,8);assert.ok(result.salary<=50000);
+  assert.ok(result.lineup.every(p=>p.projectionSource==='consensus'));
+});
+test('DraftKings Combined fills both single-provider cases and model-only cases with proper scoring',()=>{
+  const dk=draftKingsFixture(), stamp=Date.parse(dk.updatedAt)+30000;
+  dk.players.forEach(p=>{p.sources.sportsline=p.sources.fuel+4;p.sourceCount=2;p.consensusProjection=p.sources.fuel+2;});
+  const ids=generateLineup(dk,{},stamp).lineup.slice(0,3).map(p=>p.id);
+  const {slate:base,model}=combinedFixture(dk,ids);
+  ids.forEach(id=>{base.players.find(p=>p.id===id).consensusProjection=null;});
+  const selected=selectProjection(base,model,'combined',stamp);
+  const result=generateLineup(selected,{locked:ids},stamp);
+  assert.ok(ids.every(id=>result.lineup.some(p=>p.id===id)));
+  assert.ok(result.salary<=50000);
+  assert.deepEqual(ids.map(id=>selected.players.find(p=>p.id===id).projectionSource),['sportsline','fuel','model']);
+  const wrong=selectProjection(base,{...model,platform:'yahoo'},'combined',stamp);
+  assert.equal(wrong.players.find(p=>p.id===ids[2]).projection,null);
+  assert.equal(wrong.players.find(p=>p.id===ids[0]).projectionSource,'sportsline');
+});
+test('DraftKings 50/50 requires two sources; fresh standalone DK model uses model minutes',()=>{
+  const dk=draftKingsFixture(), stamp=Date.parse(dk.updatedAt)+30000, model=modelFixture(dk);
+  const consensus=selectProjection(dk,model,'consensus',stamp);
+  assert.ok(slateProblem(consensus,stamp));
+  assert.ok(consensus.players.every(p=>playerProblem(p,{},'draftkings')));
+  dk.ready=false;dk.combinedReady=true;dk.players.forEach(p=>{p.minutes=null;});
+  const trained=selectProjection(dk,model,'trained',stamp);
+  assert.equal(slateProblem(trained,stamp),null);
+  assert.ok(generateLineup(trained,{},stamp).lineup.every(p=>p.minutesSource==='model'));
 });

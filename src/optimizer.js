@@ -24,14 +24,14 @@ export function slateProblem(slate, now = Date.now()) {
 export function playerProblem(p, settings = {}, platform = 'yahoo') {
   const rules = platformRules(platform);
   if (p.projectionMethod === 'trained') {
-    if (rules.id !== 'yahoo' || !p.modelAvailable || !Number.isFinite(p.projection) || p.projection <= 0) return 'Awaiting a matching trained-model prediction';
+    if (!p.modelAvailable || !Number.isFinite(p.projection) || p.projection <= 0) return 'Awaiting a matching trained-model prediction';
   } else if (p.projectionMethod === 'combined') {
-    if (rules.id !== 'yahoo' || !Number.isFinite(p.projection) || p.projection <= 0 || !['consensus','sportsline','fuel','model'].includes(p.projectionSource)) return 'Awaiting a provider forecast or matching trained-model prediction';
+    if (!Number.isFinite(p.projection) || p.projection <= 0 || !['consensus','sportsline','fuel','model'].includes(p.projectionSource)) return 'Awaiting a provider forecast or matching trained-model prediction';
     if (p.projectionSource === 'model' && !p.modelAvailable) return 'Awaiting a matching trained-model prediction';
-  } else if (!Number.isFinite(p.projection) || p.projection <= 0 || p.sourceCount < rules.projectionSources) return rules.id === 'yahoo' ? 'Awaiting both projection sources' : 'Awaiting a DraftKings projection';
+  } else if (!Number.isFinite(p.projection) || p.projection <= 0 || p.sourceCount < (p.projectionMethod === 'consensus' ? 2 : rules.projectionSources)) return rules.id === 'yahoo' || p.projectionMethod === 'consensus' ? 'Awaiting both projection sources' : 'Awaiting a DraftKings projection';
   if (['Out', 'Doubtful', 'Questionable', 'Unknown'].includes(p.injury)) return p.injury === 'Unknown' ? 'Team injury report not submitted' : p.injury;
   if (!['Not listed', 'Available', 'Probable'].includes(p.injury)) return 'Unknown injury status';
-  const providerClear = p.projectionMethod === 'combined' ? p.providerFlagsClear ?? p.providerClear : p.providerClear;
+  const providerClear = p.projectionMethod === 'combined' || (rules.id === 'draftkings' && p.projectionMethod === 'trained') ? p.providerFlagsClear ?? p.providerClear : p.providerClear;
   if (!providerClear) return 'Unresolved provider injury flag';
   if (settings.startersOnly !== false && !p.starter) return 'Outside projected starting five';
   if (!Number.isFinite(p.minutes)) return 'Awaiting projected minutes';

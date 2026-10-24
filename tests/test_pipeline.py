@@ -16,6 +16,19 @@ def test_sportsline_uses_components_not_displayed_fantasy_total():
     with pytest.raises(ValueError,match='Duplicate'):
         parse_sportsline(table([header,*rows,rows[0]]))
 
+def test_sportsline_native_dk_column_is_kept_separate_from_yahoo_and_fd():
+    header=['PLAYER','POS','TEAM','GAME','MIN','PTS','TRB','AST','ST','BK','TO','FP','FD','DK']
+    rows=[[f'Player {i}','PG','GS','GS@LAL',30,20,5,6,1,1,2,999,888,44.75] for i in range(8)]
+    parsed=parse_sportsline(table([header,*rows]))
+    assert parsed[('player0','GSW')]['points']==39
+    assert parsed[('player0','GSW')]['draftkings_points']==44.75
+    for value in ['', 'nan', '-1', 'not published']:
+        rows[0][-1]=value
+        p=parse_sportsline(table([header,*rows]))[('player0','GSW')]
+        assert p['draftkings_points'] is None and p['points']==39
+    rows[0][-1]=0
+    assert parse_sportsline(table([header,*rows]))[('player0','GSW')]['draftkings_points']==0
+
 def test_fuel_checks_date_and_preserves_injury_flag():
     rows=[[i,'PG/SG',f'Player {i} Q','','','GS','LAL','',30,'','','','','','',''] for i in range(8)]
     html='Updated At: Wed, Oct 21, 2026, 12:48 PM ET'+table(rows)
@@ -29,6 +42,10 @@ def test_starters_need_current_date_and_five_names():
     result=parse_starters(html,'2026-10-21')
     assert len(result)==5 and set(result.values())=={'confirmed'}
     with pytest.raises(ValueError,match='another date'):parse_starters(html,'2026-10-22')
+
+def test_verified_sarr_alias_matches_starters_and_injuries_without_merging_other_sarrs():
+    assert key('Alexandre Sarr') == key('Alex Sarr')
+    assert key('Alexandre Sarr') != key('Olivier Sarr')
 
 def slate_inputs():
     now=datetime(2026,10,21,17,0,tzinfo=timezone.utc)
@@ -108,6 +125,23 @@ def test_draftkings_uses_native_points_and_exact_roster_eligibility():
     assert set(slate['players'][0]['eligibleSlots'])=={'PG','SG','G','UTIL'}
     args[1]=args[1].replace('PG/SG/G/UTIL','PG/SG/C/G/UTIL')
     with pytest.raises(ValueError,match='eligibility'):make_draftkings_slate(*args)
+
+def test_draftkings_consensus_and_combined_metadata_do_not_reuse_yahoo_points():
+    args=list(draftkings_inputs())
+    for p in args[2].values():p['draftkings_points']=50
+    slate=make_draftkings_slate(*args)
+    p=slate['players'][0]
+    assert p['projection']==40 and p['consensusProjection']==45
+    assert p['sources']=={'sportsline':50,'fuel':40} and p['sourceCount']==2
+    assert slate['consensusReady'] and slate['combinedReady']
+    del args[3][('player0','GSW')]
+    p=make_draftkings_slate(*args)['players'][0]
+    assert p['consensusProjection'] is None and p['providerFlagsClear']
+    args[2]={};args[3]={}
+    empty=make_draftkings_slate(*args)
+    assert not empty['ready'] and not empty['consensusReady'] and empty['combinedReady']
+    args[6]['LAL']='pending'
+    assert not make_draftkings_slate(*args)['combinedReady']
 
 def test_draftkings_rejects_wrong_dates_and_duplicate_players():
     args=list(draftkings_inputs());args[1]=args[1].replace('10/21/2026','10/20/2026')
