@@ -44,7 +44,7 @@ function updateStatus() {
   $('app').dataset.projection = state.slate?.projectionMethod || 'consensus';
   const problem = slateProblem(state.slate);
   const failed = state.catalog?.status === 'refresh_failed' || state.catalog?.platformErrors?.[rules().id];
-  const warning = problem || (failed ? 'The last automatic refresh failed. Showing the previous snapshot; check its time before using it.' : '');
+  const warning = [problem, failed ? 'The last automatic refresh failed. Showing the previous snapshot; check its time before using it.' : ''].filter(Boolean).join(' ');
   $('notice').hidden = !warning; $('notice').textContent = warning; $('notice').classList.toggle('error', !!problem);
   $('snapshot-help').hidden = !(/snapshot|official injury report|automatic refresh/.test(warning) && !/trained-model/.test(warning));
   const yahoo = state.slate && rules().id === 'yahoo';
@@ -58,7 +58,7 @@ function updateStatus() {
       const counts = state.slate.players.reduce((a,p)=>(a[p.projectionSource]=(a[p.projectionSource]||0)+1,a),{});
       const coverage = ['consensus','sportsline','fuel','model','unavailable'].map(s=>`${sourceLabel(s)} ${counts[s]||0}`).join(' · ');
       const modelStatus = state.slate.modelFallbackProblem || `${state.slate.players.filter(p=>p.modelAvailable).length} fresh model predictions matched`;
-      $('projection-status').textContent = `${coverage}. ${modelStatus}. Eligibility filters still apply.`;
+      $('projection-status').textContent = `${coverage}. ${modelStatus.replace(/\.$/,'')}. Eligibility filters still apply.`;
     } else {
       $('projection-status').textContent = unavailable || `Model trained through ${ml.trainedThrough} · Inputs ${time(ml.inputsAt)} PT · ${state.slate.players.filter(p=>p.modelAvailable).length}/${state.slate.players.length} players matched`;
     }
