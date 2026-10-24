@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
+import {readFileSync} from 'node:fs';
 import {catalog,installFixtures,dk,yahoo} from './fixtures.js';
-import {modelFixture} from '../model-fixture.js';
+import {modelFixture,combinedFixture} from '../model-fixture.js';
+import {generateLineup} from '../../src/optimizer.js';
 
 // Published inputs stay real; hold the browser clock just after their snapshot
 // so the same build can be checked tomorrow without bypassing expiry in the app.
@@ -129,4 +131,54 @@ test('unpublished model explains the limitation and leaves consensus usable',asy
   await expect(page.locator('#notice')).toContainText('No trained-model snapshot');
   await page.locator('#projection-select').selectOption('consensus');
   await expect(page.locator('#generate')).toBeEnabled();
+});
+
+test('Combined labels all fallback sources and retains them in saved and exported lineups',async({page},testInfo)=>{
+  const ids=generateLineup(yahoo,{},Date.parse(yahoo.updatedAt)+30000).lineup.slice(0,3).map(p=>p.id);
+  const fixture=combinedFixture(yahoo,ids);
+  await page.route(`**/data/${yahoo.date}-${yahoo.id}.json*`,route=>route.fulfill({json:fixture.slate}));
+  await page.route('**/data/ml-*.json*',route=>route.fulfill({json:fixture.model}));
+  await page.goto('./?platform=yahoo');
+  await page.locator('#projection-select').selectOption('combined');
+  await expect(page.locator('#projection-status')).toContainText('SportsLine');
+  for (const [i,label] of ['SportsLine','Fuel','Trained model'].entries()) {
+    const row=page.locator(`[data-player-id="${ids[i]}"]`);
+    await expect(row.locator('.projection-cell .alt-projection')).toHaveText(label);
+    await row.locator('[data-lock]').click();
+  }
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  await expect(page.locator('#model-label')).toHaveText('Combined');
+  await expect(page.locator('#projection-comparison')).toContainText('50/50 —');
+  await page.locator('#copy-lineup').click();
+  const copied=await page.evaluate(()=>navigator.clipboard.readText());
+  expect(copied).toContain('Method: Combined');expect(copied).toContain('Model minutes');
+  for (const label of ['SportsLine','Fuel','Trained model']) expect(copied).toContain(label);
+  await page.locator('#save-lineup').click();await page.locator('#mobile-saved').click();
+  await expect(page.locator('.saved-card')).toContainText('Combined');await page.locator('#close-modal').click();
+  const downloadPromise=page.waitForEvent('download');await page.locator('#download-lineup').click();
+  const download=await downloadPromise;
+  const csv=readFileSync(await download.path(),'utf8');
+  expect(csv).toContain('"Projection source","Minutes","Minutes source"');
+  for (const label of ['Combined','SportsLine','Fuel','Trained model']) expect(csv).toContain(`"${label}"`);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
+  await page.screenshot({path:`screenshots/combined-${testInfo.project.name}.png`,fullPage:true});
+});
+
+test('Combined drops a lineup when model minutes expire, while provider builds remain available',async({page})=>{
+  const ids=generateLineup(yahoo,{},Date.parse(yahoo.updatedAt)+30000).lineup.slice(0,3).map(p=>p.id);
+  const fixture=combinedFixture(yahoo,ids);
+  fixture.model.inputsAt=fixture.model.generatedAt=new Date(Date.parse(yahoo.updatedAt)-119*60000).toISOString();
+  await page.route(`**/data/${yahoo.date}-${yahoo.id}.json*`,route=>route.fulfill({json:fixture.slate}));
+  await page.route('**/data/ml-*.json*',route=>route.fulfill({json:fixture.model}));
+  await page.goto('./?platform=yahoo');await page.locator('#projection-select').selectOption('combined');
+  await page.locator(`[data-player-id="${ids[1]}"] [data-lock]`).click();
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  await page.clock.setFixedTime(new Date(Date.parse(yahoo.updatedAt)+2*60000));
+  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+  await expect(page.locator('#roster-count')).toHaveText('0 / 8');
+  await expect(page.locator('#lineup-message')).toContainText('model inputs are over two hours');
+  await expect(page.locator('#copy-lineup')).toBeDisabled();
+  await expect(page.locator('#generate')).toBeEnabled();
+  await page.locator('#reset-pool').click();
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
 });

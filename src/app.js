@@ -3,7 +3,7 @@ import { createIcons, LayoutDashboard, Bookmark, ChartNoAxesCombined, Sparkles, 
 import { playerProblem, slateProblem } from './optimizer.js';
 import { platformRules, money } from './platforms.js';
 import { defaultBuildSettings } from './build-settings.js';
-import { selectProjection, projectionLabel, comparisonTotals } from './projections.js';
+import { selectProjection, projectionLabel, sourceLabel, comparisonTotals, lineupModelProblem } from './projections.js';
 
 const icons = { LayoutDashboard, Bookmark, ChartNoAxesCombined, Sparkles, ChevronRight, CircleHelp, RefreshCw, CalendarDays, ChevronDown, SlidersHorizontal, Search, LockKeyhole, Ban, Info, ArrowUpRight, ShieldCheck, WandSparkles, ArrowRight, Copy, Download, X, Check };
 const $ = id => document.getElementById(id);
@@ -41,6 +41,7 @@ function showModal(title, html) {
 }
 function updateStatus() {
   if (state.baseSlate) state.slate = selectProjection(state.baseSlate, state.modelSnapshot, state.projectionMethod);
+  $('app').dataset.projection = state.slate?.projectionMethod || 'consensus';
   const problem = slateProblem(state.slate);
   const failed = state.catalog?.status === 'refresh_failed' || state.catalog?.platformErrors?.[rules().id];
   const warning = problem || (failed ? 'The last automatic refresh failed. Showing the previous snapshot; check its time before using it.' : '');
@@ -53,8 +54,15 @@ function updateStatus() {
   if (yahoo) {
     const ml = state.modelSnapshot;
     const unavailable = state.slate.trainedProblem;
-    $('projection-status').textContent = unavailable || `Model trained through ${ml.trainedThrough} · Inputs ${time(ml.inputsAt)} PT · ${state.slate.players.filter(p=>p.modelAvailable).length}/${state.slate.players.length} players matched`;
-    $('projection-status').title = 'Model snapshots are generated privately. The public refresh workflow updates consensus data only.';
+    if (state.projectionMethod === 'combined') {
+      const counts = state.slate.players.reduce((a,p)=>(a[p.projectionSource]=(a[p.projectionSource]||0)+1,a),{});
+      const coverage = ['consensus','sportsline','fuel','model','unavailable'].map(s=>`${sourceLabel(s)} ${counts[s]||0}`).join(' · ');
+      const modelStatus = state.slate.modelFallbackProblem || `${state.slate.players.filter(p=>p.modelAvailable).length} fresh model predictions matched`;
+      $('projection-status').textContent = `${coverage}. ${modelStatus}. Eligibility filters still apply.`;
+    } else {
+      $('projection-status').textContent = unavailable || `Model trained through ${ml.trainedThrough} · Inputs ${time(ml.inputsAt)} PT · ${state.slate.players.filter(p=>p.modelAvailable).length}/${state.slate.players.length} players matched`;
+    }
+    $('projection-status').title = 'Model snapshots are generated privately. Refreshing public data does not refresh the trained model.';
   }
   $('model-label').textContent = state.slate?.model?.name || 'Daily projections';
   $('generate').disabled = !!problem || state.loading || state.busy;
@@ -69,6 +77,10 @@ function updateStatus() {
     $('footer-update').textContent = `Scheduled checks every 15 min · delays possible`;
   }
   if (problem && state.result) invalidateResultOnly(problem);
+  if (state.result) {
+    const expired = lineupModelProblem(state.slate, state.result.lineup);
+    if (expired) invalidateResultOnly(`${expired} Generate a new lineup using the available sources.`);
+  }
   drawIcons();
 }
 function invalidateResultOnly(problem) {
@@ -109,7 +121,7 @@ async function loadData(id = state.slate?.id) {
     state.slate = selectProjection(slate,modelSnapshot,state.projectionMethod); $('slate-select').value = slate.id;
     if (changed) { state.locked.clear(); state.excluded.clear(); state.game = state.position = 'ALL'; $('search').value=''; }
     if (!state.settingsCustomized) state.settings = defaultBuildSettings(slate);
-    if (!slate.players.some(p=>!problemForPlayer(p))) $('eligible-only').checked=false;
+    if (!state.slate.players.some(p=>!problemForPlayer(p))) $('eligible-only').checked=false;
     $('date-label').textContent = dateLabel(slate.date);
     const platform=rules(); $('app').dataset.platform=platform.id;
     $('platform-pill').innerHTML=`<span class="${platform.id === 'yahoo' ? 'yahoo-logo' : 'dk-logo'}">${platform.id === 'yahoo' ? 'y!' : 'DK'}</span>${platform.name}`;
@@ -146,9 +158,10 @@ function renderPool() {
   $('position-tabs').innerHTML = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'].map(pos => `<button data-position="${pos}" class="${state.position === pos ? 'active' : ''}" aria-pressed="${state.position === pos}">${pos === 'ALL' ? 'All' : pos}</button>`).join('');
   $('players-body').innerHTML = filtered.length ? filtered.map(p => {
     const locked = state.locked.has(p.id), excluded = state.excluded.has(p.id), problem = problemForPlayer(p);
-    const comparison = rules().id === 'yahoo' ? `<small class="alt-projection">${state.projectionMethod === 'trained' ? '50/50 ' + number(p.consensusProjection) : 'ML ' + number(p.modelProjection)}</small>` : '';
+    const comparison = rules().id === 'yahoo' ? `<small class="alt-projection">${state.projectionMethod === 'combined' ? sourceLabel(p.projectionSource) : state.projectionMethod === 'trained' ? '50/50 ' + number(p.consensusProjection) : 'ML ' + number(p.modelProjection)}</small>` : '';
+    const minutesCell = `${number(p.minutes)}${p.minutesSource === 'model' ? '<small class="alt-projection">Model min</small>' : ''}`;
     const shortStatus = ['Out','Doubtful','Questionable','Unknown'].includes(p.injury) ? p.injury : '';
-    return `<tr class="player-row ${locked ? 'locked' : ''} ${excluded ? 'excluded' : ''}" data-player-id="${esc(p.id)}" title="${esc(problem || `${p.starterStatus} starter · ${p.injury}`)}"><td><button class="row-action ${locked ? 'locked' : ''}" data-lock="${esc(p.id)}" aria-label="${locked ? 'Unlock' : 'Lock'} ${esc(p.name)}" aria-pressed="${locked}" ${problem && !locked ? 'disabled' : ''}>${icon('lock-keyhole')}</button></td><td class="player-cell"><div class="player-wrap"><span class="player-avatar">${esc(p.name.split(' ').map(w => w[0]).slice(0,2).join(''))}</span><div><div class="player-name">${esc(p.name)} ${p.newPlayer ? '<span class="new-badge" title="Platform historical average is zero; may be a rookie or missing history">NEW</span>' : ''}${shortStatus ? `<span class="status-badge">${esc(shortStatus)}</span>` : ''}</div><div class="player-meta"><b>${esc(p.team)}</b> vs ${esc(p.opponent)} · ${time(p.tipoff)}</div></div></div></td><td><span class="pos-tag">${esc(p.position)}</span></td><td class="salary-cell">${money(p.salary)}</td><td>${number(p.minutes)}</td><td class="projection-cell" title="${rules().id === 'draftkings' ? 'Fuel DraftKings: ' + number(p.sources.fuel) : 'SportsLine: ' + number(p.sources.sportsline) + ' · Fuel: ' + number(p.sources.fuel)}">${number(p.projection)}${comparison}</td><td class="value-cell ${valueForPlayer(p) >= (rules().id === 'draftkings' ? 5 : 1.3) ? 'good' : ''}">${Number.isFinite(p.projection) ? valueForPlayer(p).toFixed(2) + '×' : '—'}</td><td><button class="row-action ${excluded ? 'excluded' : ''}" data-exclude="${esc(p.id)}" aria-label="${excluded ? 'Include' : 'Exclude'} ${esc(p.name)}" aria-pressed="${excluded}">${icon('ban')}</button></td></tr>`;
+    return `<tr class="player-row ${locked ? 'locked' : ''} ${excluded ? 'excluded' : ''}" data-player-id="${esc(p.id)}" title="${esc(problem || `${p.starterStatus} starter · ${p.injury}`)}"><td><button class="row-action ${locked ? 'locked' : ''}" data-lock="${esc(p.id)}" aria-label="${locked ? 'Unlock' : 'Lock'} ${esc(p.name)}" aria-pressed="${locked}" ${problem && !locked ? 'disabled' : ''}>${icon('lock-keyhole')}</button></td><td class="player-cell"><div class="player-wrap"><span class="player-avatar">${esc(p.name.split(' ').map(w => w[0]).slice(0,2).join(''))}</span><div><div class="player-name">${esc(p.name)} ${p.newPlayer ? '<span class="new-badge" title="Platform historical average is zero; may be a rookie or missing history">NEW</span>' : ''}${shortStatus ? `<span class="status-badge">${esc(shortStatus)}</span>` : ''}</div><div class="player-meta"><b>${esc(p.team)}</b> vs ${esc(p.opponent)} · ${time(p.tipoff)}</div></div></div></td><td><span class="pos-tag">${esc(p.position)}</span></td><td class="salary-cell">${money(p.salary)}</td><td>${minutesCell}</td><td class="projection-cell" title="${rules().id === 'draftkings' ? 'Fuel DraftKings: ' + number(p.sources.fuel) : 'SportsLine: ' + number(p.sources.sportsline) + ' · Fuel: ' + number(p.sources.fuel)}">${number(p.projection)}${comparison}</td><td class="value-cell ${valueForPlayer(p) >= (rules().id === 'draftkings' ? 5 : 1.3) ? 'good' : ''}">${Number.isFinite(p.projection) ? valueForPlayer(p).toFixed(2) + '×' : '—'}</td><td><button class="row-action ${excluded ? 'excluded' : ''}" data-exclude="${esc(p.id)}" aria-label="${excluded ? 'Include' : 'Exclude'} ${esc(p.name)}" aria-pressed="${excluded}">${icon('ban')}</button></td></tr>`;
   }).join('') : '<tr><td colspan="8" class="table-empty">No players match these filters. Try another position or turn off “Eligible only.”</td></tr>';
   document.querySelectorAll('[data-sort]').forEach(button => { button.textContent = `${{salary:'SALARY',minutes:'MIN',projection:'PROJ',value:'VALUE'}[button.dataset.sort]}${state.sort === button.dataset.sort ? state.direction < 0 ? ' ↓' : ' ↑' : ''}`; });
   document.querySelector('[data-sort="value"]').title=rules().id==='draftkings'?'Projected fantasy points per $1,000 salary':'Projected fantasy points per $1 salary';
@@ -167,7 +180,7 @@ function renderLineup() {
   $('budget-fill').style.width = `${(result?.salary || 0) / platform.salaryCap * 100}%`;
   $('lineup-rows').innerHTML = platform.slots.map(slot => {
     const p = result?.lineup.find(p => p.slot === slot);
-    return `<div class="lineup-row" data-slot="${slot}"><span class="slot-pill">${slot}</span>${p ? `<div class="lineup-player"><strong>${esc(p.name)}</strong><small>${esc(p.team)} · ${esc(p.position)} · ${money(p.salary)}</small></div><div class="lineup-points"><strong>${number(p.projection)}</strong><small>FPTS</small></div>` : '<span class="empty-slot">Open position</span><span class="empty-dash">—</span>'}</div>`;
+    return `<div class="lineup-row" data-slot="${slot}"><span class="slot-pill">${slot}</span>${p ? `<div class="lineup-player"><strong>${esc(p.name)}</strong><small>${esc(p.team)} · ${esc(p.position)} · ${money(p.salary)}</small></div><div class="lineup-points"><strong>${number(p.projection)}</strong><small>${state.projectionMethod === 'combined' ? sourceLabel(p.projectionSource) : 'FPTS'}</small></div>` : '<span class="empty-slot">Open position</span><span class="empty-dash">—</span>'}</div>`;
   }).join('');
   $('build-rules').innerHTML = `${icon('shield-check')}<span>${state.settings.startersOnly ? 'Starters' : 'Include bench'} · ${state.settings.minMinutes}+ min · Max ${state.settings.maxNewPlayers} new</span>`;
   ['copy-lineup','download-lineup','save-lineup'].forEach(id => { $(id).disabled = !result; });
@@ -187,7 +200,7 @@ async function generate() {
       worker.postMessage({ slate: snapshot, settings: settings(), now: Date.now() });
     });
     if (run !== generation) return;
-    const latestProblem = slateProblem(snapshot);
+    const latestProblem = slateProblem(snapshot) || lineupModelProblem(snapshot, result.lineup);
     if (latestProblem) throw new Error(latestProblem);
     state.result = {...result,projectionMethod:snapshot.projectionMethod,modelName:snapshot.model?.name,modelInputsAt:snapshot.trainedSnapshot?.inputsAt}; renderLineup();
     message(`8 players · ${new Set(result.lineup.map(p => p.team)).size} teams · Check starters again before tipoff.`);
@@ -208,9 +221,10 @@ function method() {
   const scoring=dk
     ? 'Points + 0.5 × made threes + 1.25 × rebounds + 1.5 × assists + 2 × steals + 2 × blocks − 0.5 × turnovers. Double-double and triple-double bonuses are +1.5 and +3. We use the provider’s forecast directly; we do not award a bonus simply because an average stat projection reaches ten.'
     : 'Points + 1.2 × rebounds + 1.5 × assists + 3 × steals + 3 × blocks − turnovers.';
-  const poolRule=dk ? 'A native DraftKings forecast and current projected minutes are required. Multiple listed positions are supported, with each player selected only once. At least two different games must be represented.' : 'Both current forecast sources are required. At least three different teams must be represented.';
+  const poolRule=dk ? 'A native DraftKings forecast and current projected minutes are required. Multiple listed positions are supported, with each player selected only once. At least two different games must be represented.' : '50/50 requires both current provider forecasts. Combined averages both when available, uses the sole provider when only one is available, and uses a fresh trained-model prediction when neither is available. At least three different teams must be represented.';
   showModal('A transparent starting point', `<p>${description}</p><p>${scoring} Value means fantasy points per ${dk ? '$1,000' : '$1'} of salary.</p>
-    <p>${dk ? '' : 'Yahoo defaults to the 50/50 consensus. The optional trained model uses the private Yahoo fit with current starter overrides. Only its derived predictions are published; the model and training data stay private. The same SportsLine minutes filters and injury checks apply to both methods for comparison. Missing model predictions are excluded, never filled with consensus values.'} Profitability has not been validated. This builds one lineup with a high projected total; it does not model ownership or tournament payout risk.</p>
+    <p>${dk ? '' : 'Yahoo defaults to the 50/50 consensus. Combined shows the chosen source below each forecast. It uses model minutes for model-based points, or when SportsLine minutes are missing. Players without usable minutes remain excluded, even with a zero-minute filter. The separate trained-model option remains experimental. Only derived predictions are published; the model and training data stay private.'} Profitability has not been validated. This builds one lineup with a high projected total; it does not model ownership or tournament payout risk.</p>
+    <p>These are projection providers, not direct betting-market feeds. Missing forecasts can reflect provider coverage, publication timing, or a failed player/matchup match; they do not establish that a player will receive few minutes.</p>
     <p>${dk ? '' : 'The trained model is experimental. A higher forecast from one method does not establish better accuracy. Model inputs expire after two hours; changes to a team’s player pool, injuries, or starters invalidate predictions for that matchup. A new private export is required to refresh them. The public refresh workflow does not run or retrain the private model.'}</p>
     <h3>Who can enter a lineup?</h3><p>Players must meet your minutes and starter filters and have no unresolved injury flag. Official team injury reports must be submitted. ${poolRule}</p>
     <p>Two-game slates default to including healthy bench players with 16+ projected minutes, so cheaper rotation players can fit the budget. Larger slates default to starters with 24+ minutes. Your custom settings are kept when switching slates.</p>
@@ -222,7 +236,7 @@ function method() {
 }
 
 function openSettings() {
-  showModal('Build settings', `<div class="setting-row"><label for="setting-minutes">Minimum projected minutes<small>Minutes come from SportsLine’s current forecast.</small></label><select id="setting-minutes">${[0,16,20,24,28,30,32].map(n => `<option value="${n}" ${n === state.settings.minMinutes ? 'selected' : ''}>${n}+ min</option>`).join('')}</select></div><div class="setting-row"><label for="setting-starters">Projected starters only<small>Turn off to consider healthy bench players.</small></label><input id="setting-starters" type="checkbox" ${state.settings.startersOnly ? 'checked' : ''}></div><div class="setting-row"><label for="setting-new">Maximum new players<small>“New” means this platform has a zero historical average, including rookies and missing history.</small></label><select id="setting-new">${[0,1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${n === state.settings.maxNewPlayers ? 'selected' : ''}>${n}</option>`).join('')}</select></div><button id="apply-settings" class="button generate">Apply settings</button>`);
+  showModal('Build settings', `<div class="setting-row"><label for="setting-minutes">Minimum projected minutes<small>${rules().id === 'yahoo' ? 'Minutes come from SportsLine; Combined can use fresh trained-model minutes when needed.' : 'Minutes come from SportsLine’s current forecast.'}</small></label><select id="setting-minutes">${[0,16,20,24,28,30,32].map(n => `<option value="${n}" ${n === state.settings.minMinutes ? 'selected' : ''}>${n}+ min</option>`).join('')}</select></div><div class="setting-row"><label for="setting-starters">Projected starters only<small>Turn off to consider healthy bench players.</small></label><input id="setting-starters" type="checkbox" ${state.settings.startersOnly ? 'checked' : ''}></div><div class="setting-row"><label for="setting-new">Maximum new players<small>“New” means this platform has a zero historical average, including rookies and missing history.</small></label><select id="setting-new">${[0,1,2,3,4,5,6,7,8].map(n => `<option value="${n}" ${n === state.settings.maxNewPlayers ? 'selected' : ''}>${n}</option>`).join('')}</select></div><button id="apply-settings" class="button generate">Apply settings</button>`);
   $('apply-settings').onclick = () => {
     state.settings = { minMinutes: +$('setting-minutes').value, startersOnly: $('setting-starters').checked, maxNewPlayers: +$('setting-new').value };
     state.settingsCustomized = true;
@@ -232,7 +246,7 @@ function openSettings() {
 function lineupText(result, slate) {
   const platform=platformRules(slate);
   const totals = comparisonTotals(result.lineup);
-  return `Slate Lab · ${platform.name} NBA · ${slate.date}\nMethod: ${result.modelName || slate.model?.name || 'Daily projections'}\n${result.lineup.map(p => `${p.slot}: ${p.name} (${p.team}) ${money(p.salary)}`).join('\n')}\nSalary: ${money(result.salary)}/${money(platform.salaryCap)} · Projection: ${result.projection.toFixed(2)}${platform.id === 'yahoo' ? `\nSame lineup: 50/50 ${number(totals.consensus)} · Trained ${number(totals.trained)}` : ''}\nReview starters and injury news before entering.`;
+  return `Slate Lab · ${platform.name} NBA · ${slate.date}\nMethod: ${result.modelName || slate.model?.name || 'Daily projections'}\n${result.lineup.map(p => `${p.slot}: ${p.name} (${p.team}) ${money(p.salary)}${result.projectionMethod === 'combined' ? ` · ${sourceLabel(p.projectionSource)}${p.minutesSource === 'model' ? ' · Model minutes' : ''}` : ''}`).join('\n')}\nSalary: ${money(result.salary)}/${money(platform.salaryCap)} · Projection: ${result.projection.toFixed(2)}${platform.id === 'yahoo' ? `\nSame lineup: 50/50 ${number(totals.consensus)} · Trained ${number(totals.trained)}` : ''}\nReview starters and injury news before entering.`;
 }
 async function copyResult(result = state.result, slate = state.slate) {
   if (!result) return;
@@ -243,7 +257,7 @@ async function copyResult(result = state.result, slate = state.slate) {
 function downloadResult() {
   if (!state.result) return;
   const cell = value => `"${String(value).replace(/"/g,'""')}"`;
-  const rows = [['Slot','Player',`${rules().name} ID`,'Team','Position','Salary','Projection','Slate date','Snapshot time','Method','50/50 points','Trained points','Model inputs time'], ...state.result.lineup.map(p => [p.slot,p.name,p.id,p.team,p.position,p.salary,p.projection,state.slate.date,state.slate.updatedAt,state.result.modelName,p.consensusProjection ?? '',p.modelProjection ?? '',state.result.modelInputsAt ?? ''])];
+  const rows = [['Slot','Player',`${rules().name} ID`,'Team','Position','Salary','Projection','Slate date','Snapshot time','Method','50/50 points','Trained points','Model inputs time','Projection source','Minutes','Minutes source'], ...state.result.lineup.map(p => [p.slot,p.name,p.id,p.team,p.position,p.salary,p.projection,state.slate.date,state.slate.updatedAt,state.result.modelName,p.consensusProjection ?? '',p.modelProjection ?? '',state.result.modelInputsAt ?? '',rules().id === 'draftkings' ? 'Fuel DraftKings' : sourceLabel(p.projectionSource),p.minutes ?? '',p.minutesSource ?? 'sportsline'])];
   const url = URL.createObjectURL(new Blob([rows.map(row => row.map(cell).join(',')).join('\r\n')], { type:'text/csv;charset=utf-8' }));
   const link = document.createElement('a'); link.href = url; link.download = `slatelab-${rules().id}-${state.slate.date}-${state.slate.id}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast(`Review CSV downloaded — enter these players on ${rules().name}`);

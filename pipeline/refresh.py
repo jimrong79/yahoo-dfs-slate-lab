@@ -255,13 +255,17 @@ def make_slate(contest, csv_text, sports, fuel, starters, injuries, coverage, da
                         'sources':{'sportsline':round(a['points'],3) if a else None,'fuel':b['points'] if b else None},
                         'starter':identity in starters,'starterStatus':starters.get(identity,'reserve'),
                         'injury':status,'providerClear':bool(b) and b['badge'] not in {'O','OUT','Q','D','GTD','DTD'},
+                        'providerFlagsClear':yahoo_status in {'','NONE','P','PROBABLE','ACTIVE'} and (not b or b['badge'] in {'','P','PROBABLE'}),
                         'newPlayer':float(p['FPPG'])==0,'historicalAverage':float(p['FPPG'])})
     if len(players)<20:raise ValueError('Yahoo salary pool is incomplete.')
     ready=all(coverage.get(g[k])=='submitted' for g in games for k in ['away','home']) and sum(p['sourceCount']==2 for p in players)>=8
+    combined_ready=all(coverage.get(g[k])=='submitted' for g in games for k in ['away','home']) and bool(starters)
     return {'schemaVersion':1,'platform':'yahoo','id':str(contest['seriesId']),'contestId':str(contest['id']),'contestTitle':contest['title'],
             'contestUrl':f'https://sports.yahoo.com/dailyfantasy/contest/{contest["id"]}',
             'date':date,'updatedAt':iso(now),'firstTip':iso(first),'salaryCap':200,'ready':ready,
             'readinessReason':None if ready else 'Some team injury reports or daily projections are not ready.',
+            'combinedReady':combined_ready,
+            'combinedReadinessReason':None if combined_ready else 'Combined is waiting for current starting lineups or official team injury reports.',
             'injuryReportedAt':reported,'model':{'id':'live-consensus-v1','name':'Daily consensus','version':'1.0',
             'description':'Equal weight current SportsLine component stats converted to Yahoo scoring and Daily Fantasy Fuel FanDuel projections. Both platforms use the same NBA scoring. Optional private-model predictions are supplied in a separate dated export.',
             'validatedProfitability':False},'sources':source_info,'games':games,'players':players}
@@ -394,6 +398,9 @@ def refresh(output, date, contest_id=None):
                     slate['ready']=False
                     slate['readinessReason']='Salaries are available. Waiting for current projections, starting lineups, or official team injury reports.'
                 slate['sourceErrors']=errors
+                if any(k in errors for k in ('injuries','starters')):
+                    slate['combinedReady']=False
+                    slate['combinedReadinessReason']='Combined is waiting for current starting lineups or official team injury reports.'
                 publish(slate,{**s,'label':('Main slate' if i==0 else 'Late slate' if i==len(slates)-1 else 'Evening slate')},f'{date}-{s["seriesId"]}.json')
             except Exception as exc:discovery_errors['yahoo']=str(exc)
         if dk:

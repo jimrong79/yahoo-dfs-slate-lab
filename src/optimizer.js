@@ -1,6 +1,6 @@
 import solver from 'javascript-lp-solver';
 import { platformRules, eligibleSlots, money, YAHOO_SLOTS, ELIGIBILITY } from './platforms.js';
-import { trainedProblem } from './projections.js';
+import { trainedProblem, selectProjection } from './projections.js';
 
 export const SLOTS = YAHOO_SLOTS;
 export { ELIGIBILITY };
@@ -25,12 +25,17 @@ export function playerProblem(p, settings = {}, platform = 'yahoo') {
   const rules = platformRules(platform);
   if (p.projectionMethod === 'trained') {
     if (rules.id !== 'yahoo' || !p.modelAvailable || !Number.isFinite(p.projection) || p.projection <= 0) return 'Awaiting a matching trained-model prediction';
+  } else if (p.projectionMethod === 'combined') {
+    if (rules.id !== 'yahoo' || !Number.isFinite(p.projection) || p.projection <= 0 || !['consensus','sportsline','fuel','model'].includes(p.projectionSource)) return 'Awaiting a provider forecast or matching trained-model prediction';
+    if (p.projectionSource === 'model' && !p.modelAvailable) return 'Awaiting a matching trained-model prediction';
   } else if (!Number.isFinite(p.projection) || p.projection <= 0 || p.sourceCount < rules.projectionSources) return rules.id === 'yahoo' ? 'Awaiting both projection sources' : 'Awaiting a DraftKings projection';
   if (['Out', 'Doubtful', 'Questionable', 'Unknown'].includes(p.injury)) return p.injury === 'Unknown' ? 'Team injury report not submitted' : p.injury;
   if (!['Not listed', 'Available', 'Probable'].includes(p.injury)) return 'Unknown injury status';
-  if (!p.providerClear) return 'Unresolved provider injury flag';
+  const providerClear = p.projectionMethod === 'combined' ? p.providerFlagsClear ?? p.providerClear : p.providerClear;
+  if (!providerClear) return 'Unresolved provider injury flag';
   if (settings.startersOnly !== false && !p.starter) return 'Outside projected starting five';
-  if (!Number.isFinite(p.minutes) || p.minutes < (settings.minMinutes ?? 24)) return 'Below minutes minimum';
+  if (!Number.isFinite(p.minutes)) return 'Awaiting projected minutes';
+  if (p.minutes < (settings.minMinutes ?? 24)) return 'Below minutes minimum';
   if (!eligibleSlots(p, rules.id).length || !Number.isInteger(p.salary) || p.salary < rules.minSalary || p.salary > rules.salaryCap) return `Invalid ${rules.name} salary or position`;
   return null;
 }
@@ -68,6 +73,7 @@ export function assignSlots(players, platform = 'yahoo') {
   return best.lineup;
 }
 export function generateLineup(slate, settings = {}, now = Date.now()) {
+  if (slate?.projectionMethod === 'combined') slate = selectProjection(slate, slate.trainedSnapshot, 'combined', now);
   const rules = platformRules(slate);
   if (slate?.salaryCap !== undefined && slate.salaryCap !== rules.salaryCap) throw new Error('Published salary cap does not match the platform.');
   if (!Number.isInteger(settings.maxNewPlayers ?? 2) || (settings.maxNewPlayers ?? 2) < 0 || (settings.maxNewPlayers ?? 2) > 8 || !Number.isFinite(settings.minMinutes ?? 24) || (settings.minMinutes ?? 24) < 0 || (settings.minMinutes ?? 24) > 48) throw new Error('Invalid build settings.');

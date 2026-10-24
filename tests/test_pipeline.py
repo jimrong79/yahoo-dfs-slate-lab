@@ -60,6 +60,25 @@ def test_identity_normalization_and_duplicate_salary_rejection():
     args=list(slate_inputs());args[1]+='0,Player,0,PG,10,GS,LAL,GS@LAL,10,\r\n'
     with pytest.raises(ValueError,match='identity'):make_slate(*args)
 
+def test_combined_separates_missing_forecasts_from_actual_injury_flags():
+    args=list(slate_inputs());args[4][('player0','GSW')]='projected'
+    del args[3][('player0','GSW')]
+    args[3][('player1','GSW')]['badge']='Q'
+    args[1]=args[1].replace('2,Player,2,PG,10,GS,LAL,GS@LAL,10,', '2,Player,2,PG,10,GS,LAL,GS@LAL,10,DTD')
+    result=make_slate(*args)
+    assert result['combinedReady']
+    assert not result['players'][0]['providerClear']  # Strict modes unchanged.
+    assert result['players'][0]['providerFlagsClear']
+    assert not result['players'][1]['providerFlagsClear']
+    assert not result['players'][2]['providerFlagsClear']
+    args[2]={};args[3]={}
+    result=make_slate(*args)
+    assert not result['ready'] and result['combinedReady']  # Fresh ML may fill projections.
+    args[6]['LAL']='pending'
+    assert not make_slate(*args)['combinedReady']
+    args[6]['LAL']='submitted';args[4]={}
+    assert not make_slate(*args)['combinedReady']
+
 def draftkings_inputs():
     now=datetime(2026,10,21,17,0,tzinfo=timezone.utc)
     group={'sportId':4,'gameTypeId':70,'draftGroupId':123,'minStartTime':'2026-10-21T23:00:00Z','contestType':{'gameType':'SalaryCap'},'allTags':['Featured'],'games':[
