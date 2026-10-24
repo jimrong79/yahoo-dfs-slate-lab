@@ -48,6 +48,10 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
+          # Reruns retain earlier attempts' artifacts; select this attempt only.
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Publish
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}

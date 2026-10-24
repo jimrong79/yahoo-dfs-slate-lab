@@ -12,6 +12,7 @@ A personal Yahoo and DraftKings NBA lineup workbench. Select **Yahoo** or **Draf
 - A newly released salary pool can appear before projections and official injury reports are ready. The page displays the pool and explains why generation is unavailable. Turn off **Eligible only** to inspect players without full projections.
 - **Refresh data** reloads the latest published snapshot. It does not trigger a server job. GitHub schedules can be delayed, especially during heavy demand. Public repositories' schedules can also be disabled after 60 days without repository activity; re-enable the workflow in Actions if that happens.
 - If the snapshot is stale, open [Refresh NBA slates and publish](https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/pages.yml), select **Run workflow → Run workflow**, wait for the green check, then click **Refresh data** on the site. The stale-data message links to this workflow. This updates public-source snapshots, not private-model predictions.
+- Each workflow attempt uploads and deploys a uniquely named Pages artifact, so reruns cannot select an earlier attempt's build. After a workflow fix, start **Run workflow** on `main`; rerunning an older run uses that run's original workflow version.
 
 ## V1 method
 
