@@ -215,14 +215,26 @@ def latest_injuries(date, now):
     raise ValueError('No official injury report is available within the past three hours.')
 
 def discover(html, date, preferred=None):
-    contests=store(html,'ContestsStore')['state']['contests']
     sports=store(html,'ContestSeriesStore')
     series={str(s['series']['id']):s for sport in sports if sport['sportCode']=='nba' for s in sport['series']
             if datetime.fromtimestamp(s['earliestStartTime']/1000,UTC).astimezone(EASTERN).date().isoformat()==date and len(s['gameCodeList'])>=2}
     result=[]
     for sid,s in series.items():
-        options=[c for c in contests if c['sportCode']=='nba' and str(c['seriesId'])==sid and c['slateType']=='MULTI_GAME']
-        if not options:continue
+        # The /contests/nba URL redirects to the mixed-sport featured lobby.
+        # Its short contest preview can contain only NFL entries on Sundays.
+        # Query the public NBA list separately for each advertised slate so
+        # another sport, or a busy main slate, cannot crowd out its contests.
+        if not sid.isdigit():raise ValueError('Invalid Yahoo slate identity.')
+        url=f'https://dfyql-ro.sports.yahoo.com/v2/contestsFilteredWeb?sport=nba&seriesId={sid}&slateTypes=MULTI_GAME&scope=public&limit=25'
+        payload=fetch(url).json().get('contests',{})
+        contests=payload.get('result')
+        if payload.get('error') or not isinstance(contests,list):
+            raise ValueError(f'Yahoo NBA contest lookup failed for slate {sid}.')
+        options=[c for c in contests if c.get('sportCode')=='nba' and str(c.get('seriesId'))==sid
+                 and c.get('slateType')=='MULTI_GAME' and c.get('scope')=='public' and c.get('state')=='upcoming'
+                 and c.get('startTime')==s['earliestStartTime']]
+        if not options:
+            raise ValueError(f'Yahoo advertises NBA slate {sid}, but its public contest list has no matching upcoming contest.')
         chosen=str(options[0]['id'])
         result.append({'seriesId':sid,'contestId':chosen,'gameCount':len(s['gameCodeList']),'firstTip':iso(datetime.fromtimestamp(s['earliestStartTime']/1000,UTC))})
     result.sort(key=lambda r:(-r['gameCount'],r['firstTip']))

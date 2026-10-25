@@ -2,7 +2,51 @@ from datetime import datetime, timezone
 import csv
 import io
 import pytest
-from pipeline.refresh import parse_sportsline, parse_fuel, parse_starters, make_slate, key, discover_draftkings, make_draftkings_slate, refresh
+from pipeline.refresh import parse_sportsline, parse_fuel, parse_starters, make_slate, key, discover, discover_draftkings, make_draftkings_slate, refresh
+
+def yahoo_lobby():
+    import json
+    tip=int(datetime(2026,10,25,21,tzinfo=timezone.utc).timestamp()*1000)
+    sports=[{'sportCode':'nba','series':[
+        {'series':{'id':1},'earliestStartTime':tip,'gameCodeList':list(range(7))},
+        {'series':{'id':2},'earliestStartTime':tip+7200000,'gameCodeList':list(range(5))},
+        {'series':{'id':3},'earliestStartTime':tip,'gameCodeList':[1]},
+        {'series':{'id':4},'earliestStartTime':tip+86400000,'gameCodeList':[1,2]}]}]
+    # A valid public lobby can advertise NBA slates while its preview is all NFL.
+    html=json.dumps({'ContestSeriesStore':sports,'ContestsStore':{'state':{'contests':[
+        {'id':99,'sportCode':'nfl','seriesId':99,'slateType':'MULTI_GAME'}]}}},separators=(',',':'))
+    return html,tip
+
+def test_yahoo_discovery_uses_each_nba_slate_even_when_featured_preview_is_only_football(monkeypatch):
+    from types import SimpleNamespace
+    from urllib.parse import urlparse,parse_qs
+    html,tip=yahoo_lobby();calls=[]
+    def public_list(url):
+        query=parse_qs(urlparse(url).query);calls.append(query)
+        sid=query['seriesId'][0]
+        row={'id':100+int(sid),'sportCode':'nba','seriesId':int(sid),'slateType':'MULTI_GAME',
+             'scope':'public','state':'upcoming','startTime':tip+(7200000 if sid=='2' else 0)}
+        return SimpleNamespace(json=lambda:{'contests':{'result':[row],'error':None}})
+    monkeypatch.setattr('pipeline.refresh.fetch',public_list)
+    actual=discover(html,'2026-10-25')
+    assert [(r['seriesId'],r['contestId'],r['gameCount']) for r in actual]==[('1','101',7),('2','102',5)]
+    assert len(calls)==2 and all(q['sport']==['nba'] and q['scope']==['public'] for q in calls)
+    assert {q['seriesId'][0] for q in calls}=={'1','2'}
+
+@pytest.mark.parametrize('change', ['sport','series','single_game','private','started','date','empty','error'])
+def test_yahoo_discovery_reports_unmatched_or_failed_lookup_instead_of_silently_dropping_nba(monkeypatch,change):
+    from types import SimpleNamespace
+    html,tip=yahoo_lobby()
+    row={'id':101,'sportCode':'nba','seriesId':1,'slateType':'MULTI_GAME',
+         'scope':'public','state':'upcoming','startTime':tip}
+    changes={'sport':('sportCode','nfl'),'series':('seriesId',99),'single_game':('slateType','SINGLE_GAME'),
+             'private':('scope','private'),'started':('state','inprogress'),'date':('startTime',tip+86400000)}
+    if change in changes:
+        field,value=changes[change];row[field]=value
+    payload={'result':[] if change=='empty' else [row],'error':{'code':500} if change=='error' else None}
+    monkeypatch.setattr('pipeline.refresh.fetch',lambda url:SimpleNamespace(json=lambda:{'contests':payload}))
+    with pytest.raises(ValueError,match='Yahoo'):
+        discover(html,'2026-10-25')
 
 def table(rows):
     return '<table>'+''.join('<tr>'+''.join('<td>'+str(c)+'</td>' for c in row)+'</tr>' for row in rows)+'</table>'

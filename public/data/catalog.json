@@ -1,33 +1,45 @@
 {
   "schemaVersion": 1,
-  "date": "2026-10-24",
-  "updatedAt": "2026-10-24T17:34:08.742016Z",
-  "lastAttemptAt": "2026-10-24T17:34:08.742016Z",
+  "date": "2026-10-25",
+  "updatedAt": "2026-10-25T18:02:46.223087Z",
+  "lastAttemptAt": "2026-10-25T18:02:46.223087Z",
   "status": "ready",
   "slates": [
     {
-      "seriesId": "26060",
-      "contestId": "15888966",
-      "gameCount": 8,
-      "firstTip": "2026-10-24T22:00:00Z",
+      "seriesId": "26068",
+      "contestId": "15891622",
+      "gameCount": 7,
+      "firstTip": "2026-10-25T21:00:00Z",
       "label": "Main slate",
       "platform": "yahoo",
-      "date": "2026-10-24",
-      "file": "2026-10-24-26060.json",
-      "ready": false,
-      "playerCount": 280
+      "date": "2026-10-25",
+      "file": "2026-10-25-26068.json",
+      "ready": true,
+      "playerCount": 242
     },
     {
-      "seriesId": "dk-155576",
-      "draftGroupId": "155576",
+      "seriesId": "26069",
+      "contestId": "15891545",
       "gameCount": 5,
-      "firstTip": "2026-10-24T23:30:00Z",
+      "firstTip": "2026-10-25T23:00:00Z",
+      "label": "Late slate",
+      "platform": "yahoo",
+      "date": "2026-10-25",
+      "file": "2026-10-25-26069.json",
+      "ready": true,
+      "playerCount": 171
+    },
+    {
+      "seriesId": "dk-155635",
+      "draftGroupId": "155635",
+      "gameCount": 4,
+      "firstTip": "2026-10-25T23:00:00Z",
       "label": "Main slate",
       "platform": "draftkings",
-      "date": "2026-10-24",
-      "file": "2026-10-24-dk-155576.json",
-      "ready": false,
-      "playerCount": 175
+      "date": "2026-10-25",
+      "file": "2026-10-25-dk-155635.json",
+      "ready": true,
+      "playerCount": 136
     }
   ],
   "platformErrors": {},
