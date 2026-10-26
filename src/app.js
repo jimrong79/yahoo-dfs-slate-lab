@@ -1,6 +1,7 @@
 import './style.css';
 import { createIcons, LayoutDashboard, Bookmark, ChartNoAxesCombined, Sparkles, ChevronRight, CircleHelp, RefreshCw, CalendarDays, ChevronDown, SlidersHorizontal, Search, LockKeyhole, Ban, Info, ArrowUpRight, ShieldCheck, WandSparkles, ArrowRight, Copy, Download, X, Check } from 'lucide';
-import { playerProblem, slateProblem } from './optimizer.js';
+import { playerProblem, slateProblem } from './eligibility.js';
+import { currentSession, initializeAuth, signIn, signOut, generateAuthenticated, CONTACT_EMAIL } from './auth.js';
 import { platformRules, money } from './platforms.js';
 import { defaultBuildSettings } from './build-settings.js';
 import { selectProjection, projectionLabel, sourceLabel, comparisonTotals, lineupModelProblem } from './projections.js';
@@ -16,7 +17,8 @@ const dateLabel = value => new Date(`${value}T12:00:00Z`).toLocaleDateString('en
 const readSaved = () => { try { const data = JSON.parse(localStorage.getItem('slatelab-lineups-v1') || '[]'); return Array.isArray(data) ? data.slice(0, 30) : []; } catch { return []; } };
 const state = { catalog: null, slate: null, loading: false, busy: false, locked: new Set(), excluded: new Set(), result: null, game: 'ALL', position: 'ALL', sort: 'projection', direction: -1, settings: defaultBuildSettings(), settingsCustomized: false };
 Object.assign(state, {baseSlate:null,modelSnapshot:null,projectionMethod:'consensus',projectionMethods:{yahoo:'consensus',draftkings:'provider'}});
-let toastTimer, worker, workerTimer, generation = 0, loadGeneration = 0;
+let toastTimer, buildController, generation = 0, loadGeneration = 0;
+let authReady=false;
 const rules = () => platformRules(state.slate);
 const problemForPlayer = p => playerProblem(p, state.settings, rules().id);
 const valueForPlayer = p => Number.isFinite(p.projection) ? p.projection / p.salary * rules().valueUnit : null;
@@ -30,7 +32,7 @@ function message(text, error = false) {
   $('lineup-message').classList.toggle('error', error);
 }
 function invalidate(text = 'Settings changed. Generate a new lineup.') {
-  generation++; clearTimeout(workerTimer); worker?.terminate(); worker = null; state.busy = false; state.result = null;
+  generation++; buildController?.abort(); buildController = null; state.busy = false; state.result = null;
   renderLineup(); message(text); updateStatus();
 }
 function settings() { return { ...state.settings, locked: [...state.locked], excluded: [...state.excluded] }; }
@@ -68,7 +70,11 @@ function updateStatus() {
     $('projection-status').title = 'Model snapshots are generated privately. Refreshing public data does not refresh the trained model.';
   }
   $('model-label').textContent = state.slate?.model?.name || 'Daily projections';
-  $('generate').disabled = !!problem || state.loading || state.busy;
+  const signedIn=!!currentSession();
+  $('auth-status').textContent = signedIn ? 'Signed in as jimrong79' : authReady ? 'GitHub sign-in required to generate' : 'Checking sign-in…';
+  $('auth-button').textContent = signedIn ? 'Sign out' : 'Sign in with GitHub';
+  $('auth-button').disabled = !authReady;
+  $('generate').disabled = state.busy || !authReady || (signedIn && (!!problem || state.loading));
   $('generate').innerHTML = state.busy ? `${icon('refresh-cw')}Building your lineup…` : `${icon('wand-sparkles')}Generate lineup${icon('arrow-right')}`;
   if (state.busy) $('generate').querySelector('i')?.classList.add('spin');
   $('top-status').textContent = state.loading ? 'Loading slate' : problem ? 'Check slate status' : 'Slate ready';
@@ -120,7 +126,7 @@ async function loadData(id = state.slate?.id) {
     if (request !== loadGeneration) return;
     if (slate.schemaVersion !== 1 || slate.id !== selected.seriesId || !Array.isArray(slate.players) || !Array.isArray(slate.games) || platformRules(slate).id !== platformRules(selected).id || slate.salaryCap !== platformRules(slate).salaryCap) throw new Error('Slate data could not be validated.');
     const changed = state.slate?.id !== slate.id || state.slate?.date !== slate.date;
-    state.baseSlate = slate; state.modelSnapshot = modelSnapshot;
+    state.baseSlate = slate; state.modelSnapshot = modelSnapshot; state.slateFile=selected.file;
     state.projectionMethod = state.projectionMethods[platformRules(slate).id];
     state.slate = selectProjection(slate,modelSnapshot,state.projectionMethod); $('slate-select').value = slate.id;
     if (changed) { state.locked.clear(); state.excluded.clear(); state.game = state.position = 'ALL'; $('search').value=''; }
@@ -191,18 +197,16 @@ function renderLineup() {
   drawIcons();
 }
 async function generate() {
+  if(!currentSession()){accessPopup();return;}
   const problem = slateProblem(state.slate);
   if (problem) { message(problem, true); updateStatus(); return; }
   const run = ++generation; const snapshot = state.slate;
   state.busy = true; state.result = null; renderLineup(); updateStatus(); message('Finding a lineup within your constraints…');
   try {
-    const result = await new Promise((resolve, reject) => {
-      worker = new Worker(new URL('./optimizer.worker.js', import.meta.url), { type: 'module' });
-      workerTimer = setTimeout(() => { worker?.terminate(); reject(new Error('This build took too long. Release some locks or tighten the player pool and try again.')); }, 22000);
-      worker.onmessage = ({ data }) => { clearTimeout(workerTimer); data.ok ? resolve(data.result) : reject(new Error(data.error)); };
-      worker.onerror = () => { clearTimeout(workerTimer); reject(new Error('The lineup worker could not run. Reload the page and try again.')); };
-      worker.postMessage({ slate: snapshot, settings: settings(), now: Date.now() });
-    });
+    buildController=new AbortController();
+    const result = await generateAuthenticated({slateFile:state.slateFile,expectedUpdatedAt:state.baseSlate.updatedAt,
+      expectedModelVersion:state.modelSnapshot?.modelVersion||null,projectionMethod:state.projectionMethod,settings:settings()},
+      AbortSignal.any([buildController.signal,AbortSignal.timeout(60000)]));
     if (run !== generation) return;
     const latestProblem = slateProblem(snapshot) || lineupModelProblem(snapshot, result.lineup);
     if (latestProblem) throw new Error(latestProblem);
@@ -210,12 +214,23 @@ async function generate() {
     message(`8 players · ${new Set(result.lineup.map(p => p.team)).size} teams · Check starters again before tipoff.`);
   } catch (error) {
     if (run === generation) {
+      if(error.status===401||error.status===403)accessPopup(error.message);
       const hint = /No legal lineup|Not enough eligible|Include players from at least/.test(error.message) && snapshot.games?.length === 2 && (state.settings.startersOnly || state.settings.minMinutes > 16)
         ? ' For this two-game slate, open Settings, include bench players, and set the minutes minimum to 16.' : '';
       message(error.message + hint, true);
     }
   }
-  finally { if (run === generation) { clearTimeout(workerTimer); worker?.terminate(); worker = null; state.busy = false; updateStatus(); } }
+  finally { if (run === generation) { buildController=null; state.busy = false; updateStatus(); } }
+}
+function accessPopup(detail='') {
+  showModal('Lineup generation access', `<p>Lineup generation is currently available only to <strong>jimrong79</strong>.</p>
+    <p>To request access, contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>
+    ${detail?`<p class="auth-detail" role="status">${esc(detail)}</p>`:''}
+    <button class="button generate" id="modal-sign-in">Sign in with GitHub</button>`);
+  $('modal-sign-in').onclick=beginSignIn;
+}
+async function beginSignIn(){
+  try{await signIn(rules().id);}catch(error){accessPopup(error.message);}
 }
 function method() {
   const sources = state.slate?.sources || {}, platform=rules(), dk=platform.id==='draftkings';
@@ -294,6 +309,11 @@ $('projection-select').onchange = event => {
   renderPool();
 };
 $('generate').onclick = generate;
+$('auth-button').onclick=async()=>{
+  if(!currentSession()){await beginSignIn();return;}
+  try{await signOut();}catch{toast('Signed out in this browser. The server session will expire automatically.');}
+  invalidate('Signed out. Sign in with GitHub to generate a lineup.');
+};
 $('settings-button').onclick = openSettings;
 ['method-nav','sources-link','help-button'].forEach(id => { $(id).onclick = method; });
 $('saved-nav').onclick = savedLineups;
@@ -320,3 +340,4 @@ $('copy-lineup').onclick = () => copyResult(); $('download-lineup').onclick = do
 setInterval(() => { updateStatus(); renderPool(); }, 30000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) updateStatus(); });
 renderLineup(); updateSavedCount(); drawIcons(); loadData();
+initializeAuth().catch(error=>{if(location.hash||error.status===401||error.status===403)accessPopup(error.message);else toast(error.message);}).finally(()=>{authReady=true;updateStatus();});

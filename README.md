@@ -8,7 +8,7 @@ A personal Yahoo and DraftKings NBA lineup workbench. Select **Yahoo** or **Draf
 
 - This public repository contains the website, a browser optimizer, public-source adapters, and derived public slate snapshots. It contains no Yahoo account credentials, private entry identifiers, research training data, or trained model artifacts.
 - The model/research repository remains private. Yahoo defaults to the **50/50 consensus**. An optional **Trained model (experimental)** selector uses separately exported predictions from separate private Yahoo and DraftKings fits. Model weights, code and training data are not published. No automated training or profitability claim is implied.
-- GitHub Actions discovers current Yahoo multi-game slates and the DraftKings NBA Classic main slate and publishes snapshots on a 15-minute schedule. GitHub Pages serves static files; the optimizer runs locally in a browser worker. No login or API key is needed. Dates follow Eastern time, so the next date's slate can appear during the previous Pacific evening.
+- GitHub Actions discovers current Yahoo multi-game slates and the DraftKings NBA Classic main slate and publishes snapshots on a 15-minute schedule. GitHub Pages serves the public player table. Lineup generation requires GitHub sign-in and runs on a separate backend that permits only `jimrong79` (GitHub account ID `14351098`). Other visitors see an access popup linking to `jimrong79@gmail.com`. Dates follow Eastern time, so the next date's slate can appear during the previous Pacific evening.
 - Yahoo discovery reads advertised NBA slate metadata and queries its public NBA contest list for each slate. The general lobby's small featured preview can omit NBA contests when other sports dominate; it is not used as the contest inventory.
 - A newly released salary pool can appear before projections and official injury reports are ready. The page displays the pool and explains why generation is unavailable. Turn off **Eligible only** to inspect players without full projections.
 - **Refresh data** reloads the latest published snapshot. It does not trigger a server job. GitHub schedules can be delayed, especially during heavy demand. Public repositories' schedules can also be disabled after 60 days without repository activity; re-enable the workflow in Actions if that happens.
@@ -66,6 +66,25 @@ npm run dev
 Browser checks: install Chromium with `npx playwright install --with-deps chromium`, then run `npm run test:browser`. They intercept data requests with historical Yahoo observations and explicitly synthetic DraftKings inputs, with a fixed clock. This tests both platforms on mobile and desktop, including generation, locks/exclusions, saved lineups, downloads, platform switching, secondary positions, missing-source states, and expiry. Synthetic test data is never copied into `public/` or deployed. Run the same UI checks against deployed assets with `SLATE_LAB_URL=https://jimrong79.github.io/yahoo-dfs-slate-lab/ npm run test:browser`; actual live availability still depends on current upstream reports.
 
 The Actions workflow runs optimizer and parser checks before every deployment. It needs only the built-in workflow permissions for public Pages deployment. No access to the private model repository is configured. To refresh on demand, run **Refresh NBA slates and publish** from this repository's Actions tab.
+
+## GitHub access implementation
+
+The deployed authentication backend is configured with a dedicated GitHub app.
+Only the verified owner account may use its generation endpoint.
+
+The backend lives in the separate `yahoo-dfs-auth` workspace and Sites source repo.
+It verifies GitHub identity, stores only hashes of eight-hour app sessions, and
+authorizes every generation request. The browser sends slate selection and filters;
+the server fetches the published data and enforces the clock, injury checks and
+platform rules. OAuth secrets and GitHub access tokens never enter the frontend.
+The frontend contains no optimizer worker or fallback generation path.
+
+For credential rotation and backend maintenance, follow
+`yahoo-dfs-auth/AUTH-SETUP.md`. The backend is
+`https://jimrong79-slate-lab-api.nuttymap66.chatgpt.site`. Keep backend source modules
+in sync when changing the optimizer, eligibility, platform or projection code.
+Public projections and previously published code remain public; access controls
+protect this hosted generation service, not independently copied implementations.
 
 ## Sources
 
