@@ -24,7 +24,13 @@
     <div class="workspace">
       <header class="topbar"><div class="breadcrumb"><span>Workspace</span><i data-lucide="chevron-right"></i><strong>Lineup builder</strong></div><div class="topbar-right"><span class="live-dot"></span><span id="top-status">Loading slate</span><button class="icon-button" id="mobile-saved" aria-label="View saved lineups"><i data-lucide="bookmark"></i></button><button class="icon-button" id="help-button" aria-label="How Slate Lab works"><i data-lucide="circle-help"></i></button><span class="profile-mark">J</span></div></header>
       <main>
-        <div class="page-heading"><div><div class="eyebrow">NBA · DAILY FANTASY</div><h1>Build your next lineup<span>.</span></h1><p>A clearer view of the slate. A lineup that fits your game.</p></div><button class="button secondary refresh-button" id="refresh"><i data-lucide="refresh-cw"></i>Refresh data</button></div>
+        <div class="page-heading">
+          <div><div class="eyebrow">NBA · DAILY FANTASY</div><h1>Build your next lineup<span>.</span></h1><p>A clearer view of the slate. A lineup that fits your game.</p></div>
+          <div class="refresh-actions">
+            <button class="button secondary refresh-button" id="refresh"><i data-lucide="refresh-cw"></i>Refresh data</button>
+            <a class="workflow-link" href="https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/pages.yml" target="_blank" rel="noopener" title="Open GitHub in a new tab, choose Run workflow on main, then refresh data here after it finishes">Refresh workflow<i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+          </div>
+        </div>
         <div class="slate-toolbar"><div class="slate-select-wrap"><i data-lucide="calendar-days"></i><select id="slate-select" aria-label="Choose slate"><option>Loading today’s slates…</option></select><i data-lucide="chevron-down"></i></div><span class="source-pill" id="platform-pill"><span class="yahoo-logo">y!</span>Yahoo</span><span class="date-label" id="date-label"></span><div class="freshness" id="freshness"><span class="live-dot"></span>Checking latest snapshot</div></div>
         <div id="notice" class="notice" role="status" hidden></div>
         <div id="snapshot-help" class="snapshot-help" hidden>Refresh data reloads the published snapshot. To fetch new data, <a href="https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/pages.yml" target="_blank" rel="noopener">open the refresh workflow</a>, choose Run workflow, wait for its green check, then refresh here.</div>

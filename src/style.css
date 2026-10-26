@@ -7,6 +7,8 @@
 @media(max-width:420px){.player-avatar{display:none}.pool-tabs{padding-left:12px;padding-right:12px}#position-tabs button{padding:6px 9px}.pool-footer>span{max-width:200px}.lineup-rows{gap:0 10px}.lineup-player strong{font-size:9px}.lineup-row{gap:5px}.lineup-points strong{font-size:10px}.lineup-player small{font-size:7px}td,th{padding-left:6px;padding-right:6px}.lineup-metrics{gap:40px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
+.page-heading{gap:16px;flex-wrap:wrap}.refresh-actions{display:flex;align-items:center;gap:12px;margin-top:12px;flex-shrink:0}.refresh-actions .refresh-button{margin-top:0}.workflow-link{display:inline-flex;align-items:center;gap:4px;color:var(--green);font-size:11px;font-weight:550;white-space:nowrap;text-decoration:underline;text-underline-offset:3px}.workflow-link:hover{color:#426c4b}@media(max-width:780px){.refresh-actions{margin-top:0}.refresh-actions .refresh-button{font-size:11px;padding:10px}}
+
 .dk-logo{font-size:12px;font-weight:800;color:#e47c24;letter-spacing:-1px}#app[data-platform=draftkings] .lineup-metrics strong{font-size:20px}.slate-select-wrap select{max-width:290px}.pool-heading>div{min-width:0}.pool-heading p{line-height:1.5}.pool-heading>.button{flex-shrink:0}
 @media(max-width:780px){.slate-select-wrap{max-width:100%}.slate-select-wrap select{min-width:0;max-width:255px;font-size:10px}.source-pill{font-size:9px}.slate-toolbar{column-gap:6px}.page-footer>span:last-child{flex-wrap:wrap}}
 @media(max-width:780px){.date-label{display:block;width:100%;font-size:10px;margin-top:3px}.freshness{margin-top:0}}
