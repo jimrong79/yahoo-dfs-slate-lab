@@ -69,8 +69,8 @@ The Actions workflow runs optimizer and parser checks before every deployment. I
 
 ## GitHub access implementation
 
-This authentication branch is prepared for activation after the backend OAuth app
-is configured. The live site is unchanged until the branch is merged and deployed.
+The deployed authentication backend is configured with a dedicated GitHub app.
+Only the verified owner account may use its generation endpoint.
 
 The backend lives in the separate `yahoo-dfs-auth` workspace and Sites source repo.
 It verifies GitHub identity, stores only hashes of eight-hour app sessions, and
@@ -79,8 +79,8 @@ the server fetches the published data and enforces the clock, injury checks and
 platform rules. OAuth secrets and GitHub access tokens never enter the frontend.
 The frontend contains no optimizer worker or fallback generation path.
 
-Register the OAuth app and follow `yahoo-dfs-auth/AUTH-SETUP.md` before activating
-this branch. The expected backend is
+For credential rotation and backend maintenance, follow
+`yahoo-dfs-auth/AUTH-SETUP.md`. The backend is
 `https://jimrong79-slate-lab-api.nuttymap66.chatgpt.site`. Keep backend source modules
 in sync when changing the optimizer, eligibility, platform or projection code.
 Public projections and previously published code remain public; access controls
