@@ -20,6 +20,10 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 import pdfplumber
+try:
+    from .betting import BettingFeed
+except ImportError:  # python pipeline/refresh.py
+    from betting import BettingFeed
 
 ROOT = Path(__file__).resolve().parents[1]
 EASTERN = ZoneInfo('America/New_York')
@@ -366,6 +370,7 @@ def make_draftkings_slate(group,csv_text,sports,fuel,starters,injuries,coverage,
 
 def refresh(output, date, contest_id=None):
     now=datetime.now(UTC)
+    betting=BettingFeed(now,key,TEAM_NAMES)
     if date!=now.astimezone(EASTERN).date().isoformat():raise ValueError('Live refresh must use today’s Eastern date.')
     config=json.loads((ROOT/'config.json').read_text())
     preferred=contest_id or config['preferred_contests'].get(date)
@@ -413,6 +418,10 @@ def refresh(output, date, contest_id=None):
         source_info['sportsline']['updatedAt']=None
         source_info['injuries']={'url':injury_url,'updatedAt':reported,'capturedAt':iso(now)}
         def publish(slate,meta,filename):
+            old_path=output/filename
+            try:old=json.loads(old_path.read_text()) if old_path.exists() else None
+            except (ValueError,OSError):old=None
+            betting.attach(slate,old)
             (output/filename).write_text(json.dumps(slate,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n')
             published.append({**meta,'platform':slate['platform'],'date':date,'file':filename,'ready':slate['ready'],'playerCount':len(slate['players'])})
             print(f'Published {filename}: {len(slate["players"])} salaries, ready={slate["ready"]}',flush=True)

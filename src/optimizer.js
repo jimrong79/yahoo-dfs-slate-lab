@@ -38,7 +38,7 @@ export function assignSlots(players, platform = 'yahoo') {
   return best.lineup;
 }
 export function generateLineup(slate, settings = {}, now = Date.now()) {
-  if (slate?.projectionMethod === 'combined') slate = selectProjection(slate, slate.trainedSnapshot, 'combined', now);
+  if (['combined','market'].includes(slate?.projectionMethod)) slate = selectProjection(slate, slate.trainedSnapshot, slate.projectionMethod, now);
   const rules = platformRules(slate);
   if (slate?.salaryCap !== undefined && slate.salaryCap !== rules.salaryCap) throw new Error('Published salary cap does not match the platform.');
   if (!Number.isInteger(settings.maxNewPlayers ?? 2) || (settings.maxNewPlayers ?? 2) < 0 || (settings.maxNewPlayers ?? 2) > 8 || !Number.isFinite(settings.minMinutes ?? 24) || (settings.minMinutes ?? 24) < 0 || (settings.minMinutes ?? 24) > 48) throw new Error('Invalid build settings.');

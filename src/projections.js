@@ -1,8 +1,16 @@
 // Only derived daily predictions are public. The trained models stay private.
-export const projectionLabel = method => ({provider:'Fuel DraftKings (original)',trained:'Trained model (experimental)',combined:'Combined',consensus:'50/50 consensus'}[method] || 'Daily projections');
-export const sourceLabel = source => ({consensus:'50/50',sportsline:'SportsLine',fuel:'Fuel',model:'Trained model',unavailable:'Unavailable'}[source] || 'Unavailable');
+export const projectionLabel = method => ({provider:'Fuel DraftKings (original)',trained:'Trained model (experimental)',combined:'Combined',market:'Market blend (experimental)',consensus:'50/50 consensus'}[method] || 'Daily projections');
+export const sourceLabel = source => ({consensus:'50/50',sportsline:'SportsLine',fuel:'Fuel',betting:'Betting',market:'Market blend',model:'Trained model',unavailable:'Unavailable'}[source] || 'Unavailable');
+export const playerSourceLabel = p => p.projectionMethod === 'market' ? p.blendSources?.map(sourceLabel).join(' + ') || 'Unavailable' : sourceLabel(p.projectionSource);
 const forecast = value => Number.isFinite(value) && value >= 0;
 const validMinutes = value => Number.isFinite(value) && value >= 0 && value <= 48;
+
+export function bettingForecast(p, platform, now) {
+  const b=p.betting, updated=Date.parse(b?.updatedAt);
+  return b?.complete === true && b.method === 'devig-poisson-v1' && b.platform === platform &&
+    b.game === p.game && b.tipoff === p.tipoff && forecast(b.points) && b.points === p.sources?.betting &&
+    Number.isFinite(updated) && now-updated <= 120*60000 && updated <= now+300000 ? b.points : null;
+}
 
 export function teamContext(players, team) {
   return JSON.stringify(players.filter(p => p.team === team).map(p =>
@@ -41,26 +49,31 @@ export function selectProjection(slate, snapshot, method, now = Date.now()) {
     const modelMinutes = modelAvailable ? prediction.minutes : null;
     const sportsline = forecast(p.sources?.sportsline) ? p.sources.sportsline : null;
     const fuel = forecast(p.sources?.fuel) ? p.sources.fuel : null;
+    const betting = bettingForecast(p, platform, now);
+    const blendEntries = [['sportsline',sportsline],['fuel',fuel],['betting',betting]].filter(([,value])=>value !== null);
+    const blendSources = blendEntries.map(([name])=>name);
+    const marketProjection = blendEntries.length ? Math.round(blendEntries.reduce((sum,[,value])=>sum+value,0)/blendEntries.length*1000)/1000 : null;
     // A published zero is a forecast, not a missing source. Never replace it
     // with a more optimistic model prediction.
     const combinedSource = sportsline !== null && fuel !== null ? 'consensus' : sportsline !== null ? 'sportsline' : fuel !== null ? 'fuel' : modelAvailable ? 'model' : 'unavailable';
     const combinedProjection = combinedSource === 'consensus' ? forecast(consensusProjection) ? consensusProjection : Math.round((sportsline+fuel)/2*1000)/1000 : sportsline ?? fuel ?? modelProjection;
-    const useModelMinutes = (method === 'combined' && (combinedSource === 'model' || !validMinutes(sportslineMinutes))) || (platform === 'draftkings' && method === 'trained');
+    const useModelMinutes = (method === 'combined' && (combinedSource === 'model' || !validMinutes(sportslineMinutes))) || (method === 'market' && !validMinutes(sportslineMinutes)) || (platform === 'draftkings' && method === 'trained');
     const minutes = useModelMinutes ? modelMinutes : sportslineMinutes;
-    return {...p, consensusProjection, combinedProjection, combinedSource, modelProjection, modelMinutes, sportslineMinutes,
+    return {...p, consensusProjection, combinedProjection, combinedSource, marketProjection, blendSources, bettingProjection:betting, modelProjection, modelMinutes, sportslineMinutes,
       modelAvailable, projectionMethod:method,
-      projectionSource:method === 'provider' ? fuel !== null ? 'fuel' : 'unavailable' : method === 'combined' ? combinedSource : method === 'trained' ? modelAvailable ? 'model' : 'unavailable' : forecast(consensusProjection) ? 'consensus' : 'unavailable',
+      projectionSource:method === 'market' ? blendSources.length ? 'market' : 'unavailable' : method === 'provider' ? fuel !== null ? 'fuel' : 'unavailable' : method === 'combined' ? combinedSource : method === 'trained' ? modelAvailable ? 'model' : 'unavailable' : forecast(consensusProjection) ? 'consensus' : 'unavailable',
       minutes, minutesSource:validMinutes(minutes) ? useModelMinutes ? 'model' : 'sportsline' : 'unavailable',
-      projection:method === 'provider' ? fuel : method === 'trained' ? modelProjection : method === 'combined' ? combinedProjection : consensusProjection};
+      projection:method === 'market' ? marketProjection : method === 'provider' ? fuel : method === 'trained' ? modelProjection : method === 'combined' ? combinedProjection : consensusProjection};
   });
   const coverageProblem = !problem && players.filter(p => p.modelAvailable).length < 8 ? 'Trained-model predictions no longer match the current player pool, injuries, or starters. A new private-model export is needed.' : null;
   const combinedReady = slate.combinedReady ?? slate.ready;
   const enoughCombined = players.filter(p=>forecast(p.combinedProjection) && p.combinedProjection > 0).length >= 8;
+  const enoughMarket = players.filter(p=>forecast(p.marketProjection) && p.marketProjection > 0).length >= 8;
   const consensusReady=slate.consensusReady ?? (slate.ready && players.filter(p=>forecast(p.consensusProjection)).length>=8);
-  const readiness=method === 'combined' ? combinedReady && enoughCombined : platform === 'draftkings' && method === 'trained' ? combinedReady : method === 'consensus' ? consensusReady : slate.ready;
+  const readiness=method === 'market' ? combinedReady && enoughMarket : method === 'combined' ? combinedReady && enoughCombined : platform === 'draftkings' && method === 'trained' ? combinedReady : method === 'consensus' ? consensusReady : slate.ready;
   return {...slate,players,projectionMethod:method,trainedSnapshot:snapshot,
     combinedReady,consensusReady,ready:readiness,
-    readinessReason:method === 'combined' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughCombined ? 'Combined needs at least eight current forecasts from providers or a fresh trained-model export.' : null : method === 'consensus' && !consensusReady ? slate.readinessReason || 'Waiting for both current projection sources.' : slate.readinessReason,
+    readinessReason:method === 'market' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughMarket ? 'Market blend needs at least eight available forecasts.' : null : method === 'combined' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughCombined ? 'Combined needs at least eight current forecasts from providers or a fresh trained-model export.' : null : method === 'consensus' && !consensusReady ? slate.readinessReason || 'Waiting for both current projection sources.' : slate.readinessReason,
     modelFallbackProblem:problem, trainedProblem:problem || coverageProblem,
     model:{id:`${platform}-${method}`,name:projectionLabel(method)}};
 }
@@ -70,6 +83,11 @@ export function selectProjection(slate, snapshot, method, now = Date.now()) {
 export function lineupModelProblem(slate, lineup, now = Date.now()) {
   if (!lineup?.some(p=>p.projectionSource === 'model' || p.minutesSource === 'model')) return null;
   return trainedProblem(slate, slate.trainedSnapshot, now);
+}
+
+export function lineupBettingProblem(slate, lineup, now = Date.now()) {
+  if (lineup?.some(p => p.projectionMethod === 'market' && p.blendSources?.includes('betting') && bettingForecast(p, slate.platform || 'yahoo', now) === null)) return 'Betting quotes used by this lineup have expired. Generate again with the available sources.';
+  return null;
 }
 
 export function comparisonTotals(lineup) {
