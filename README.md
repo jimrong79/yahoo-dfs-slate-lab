@@ -15,6 +15,8 @@ A personal Yahoo and DraftKings NBA lineup workbench. Select **Yahoo** or **Draf
 - If the snapshot is stale, open [Refresh NBA slates and publish](https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/pages.yml), select **Run workflow → Run workflow**, wait for the green check, then click **Refresh data** on the site. The stale-data message links to this workflow. This updates public-source snapshots, not private-model predictions.
 - Each workflow attempt uploads and deploys a uniquely named Pages artifact, so reruns cannot select an earlier attempt's build. After a workflow fix, start **Run workflow** on `main`; rerunning an older run uses that run's original workflow version.
 
+**Optional Market blend:** equal-average the available SportsLine, Fuel, and betting-derived estimates (three, two, or one source). Live betting needs an `ODDS_API_KEY` Actions secret. [Setup, quota controls, and experimental conversion assumptions](docs/betting-blend.md).
+
 ## V1 method
 
 **Yahoo:** the projection is a 50/50 average of SportsLine component-stat forecasts converted to Yahoo scoring and Daily Fantasy Fuel FanDuel projections. NBA Yahoo and FanDuel weights are identical: points + 1.2 rebounds + 1.5 assists + 3 steals + 3 blocks − turnovers. SportsLine's displayed fantasy total is deliberately not used. Both current sources must match the player's team and opponent. Value is fantasy points per salary dollar.

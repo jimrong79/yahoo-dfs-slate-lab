@@ -38,9 +38,13 @@ jobs:
         run: |
           npm test
           python -m pytest tests/test_pipeline.py -q
+          python -m pytest tests/test_betting.py -q
       - name: Recover previous snapshots
         run: python pipeline/restore_published.py
       - name: Discover current slates and refresh public inputs
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          ODDS_SCHEDULED: ${{ vars.ODDS_SCHEDULED }}
         run: python pipeline/refresh.py
       - name: Build public site
         run: npm run build
