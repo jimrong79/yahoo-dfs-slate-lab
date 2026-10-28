@@ -10,11 +10,37 @@ No working complete no-key feed was confirmed. The adapter targets [The Odds API
 
 1. Obtain your own key from The Odds API. Review its plan and usage terms; the app does not register or buy a plan for you.
 2. In [this repository's Actions secrets](https://github.com/jimrong79/yahoo-dfs-slate-lab/settings/secrets/actions), add `ODDS_API_KEY`. Do not put the key in source, JSON snapshots, browser code, or chat.
-3. Run [Refresh NBA slates and publish](https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/pages.yml) manually, then click Refresh data on the site and choose 3-source blend.
+3. Around **3 p.m. Pacific**, open [Refresh betting odds (manual)](https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/odds.yml), choose **Run workflow → main → Run workflow**, then click Refresh data on the site and choose 3-source blend. This is a manual action, not a 3 p.m. schedule.
 
-By default only a **manual workflow run** fetches new odds. Scheduled and push runs can retain still-fresh derived estimates from the prior published slate, without consuming API credits. Successful event captures are reused for one hour; reuse never changes the original quote timestamp. To opt into fetching during scheduled/push runs, set the Actions repository **variable** `ODDS_SCHEDULED=true`.
+## Separate refresh controls
 
-One event request asks for nine markets in one region (`us`), costing up to **9 credits per game** according to the provider's returned-market quota formula. An eight-game refresh can therefore use up to 72 credits. The event list is quota-free. Quotes are fetched once per event per run and shared by Yahoo/DK. The collector checks returned remaining credits before another event request. This is not a spending cap; select a suitable plan before opting into scheduled calls.
+| Action | SportsLine / Fuel and normal slate inputs | New Odds API calls |
+| --- | --- | --- |
+| Existing 15-minute schedule or code push | Refreshed | None |
+| **Refresh NBA slates and publish** — Run workflow | Refreshed | None |
+| Website **Refresh data** | Reloads published snapshot | None |
+| **Refresh betting odds (manual)** — Run workflow | Refreshed | Enabled for today's first authorized manual run |
+
+Only GitHub account `jimrong79` (ID `14351098`) can authorize the odds workflow on `main`. The original refresh has no odds input and does not receive the API key. New calls require an explicit `ODDS_FETCH_ENABLED=true` from the separate workflow's authorization step. The previous `ODDS_SCHEDULED` setting is no longer supported.
+
+The odds workflow checks GitHub run history and allows **one attempt per Pacific calendar day**. A second run that day or a rerun skips odds and can still refresh normal inputs. Failed/cancelled earlier attempts also count because they may have spent credits before failing to publish; skipped, wrong-branch, and other-account runs do not. Shared deployment concurrency serializes both refresh workflows. If run history cannot be checked, the job stops without authorizing API calls.
+
+Normal refreshes reuse still-fresh derived betting estimates from the published snapshot. This never renews quote timestamps. **Betting quotes expire after two hours**: a capture around 3 p.m. PT is generally usable only until about 5 p.m. PT (earlier if the provider quote was already old). After expiry, 3-source blend uses available SportsLine/Fuel estimates; normal 50/50 and Combined continue their existing behavior.
+
+## Credit usage
+
+One event request asks for nine markets in one region (`us`), costing up to **9 credits per game**, based on the number of markets actually returned. The event list is quota-free. A game's request is shared across Yahoo, DraftKings, and overlapping slates in the same run.
+
+| Distinct games fetched | Maximum credits per refresh |
+| --- | --- |
+| 2 | 18 |
+| 4 | 36 |
+| 8 | 72 |
+| 12 | 108 |
+
+At full nine-market coverage, **500 credits cover about 55 game fetches per month**, approximately six eight-game refreshes or thirteen four-game refreshes. Once per day across a full slate can still exceed the free monthly allowance. Missing markets can reduce the actual charge. No automatic odds polling or paid plan changes are configured.
+
+The workflow summary reports event requests, credits charged according to response headers, and provider-reported remaining quota. If a network failure prevents confirming a charge, the summary labels it unknown instead of claiming zero. The collector checks remaining quota before another event request. No key, raw quotes, or request URLs containing the key are printed.
 
 Missing credentials, empty/incomplete data, quota/network failures, and unsupported schemas are shown as betting unavailable. SportsLine and Fuel continue to work. No live betting coverage or accuracy claim is implied by passing synthetic fixture tests.
 

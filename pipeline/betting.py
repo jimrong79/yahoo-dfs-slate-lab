@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 import math
 import os
+from pathlib import Path
 import re
 from statistics import median
 
@@ -134,29 +135,66 @@ class BettingFeed:
     def __init__(self, now, name_key, team_names, *, api_key=None, allow_fetch=None, get=None):
         self.now, self.name_key, self.team_names = now, name_key, team_names
         self.api_key = os.environ.get('ODDS_API_KEY', '') if api_key is None else api_key
-        self.allow_fetch = (os.environ.get('GITHUB_EVENT_NAME', 'workflow_dispatch') == 'workflow_dispatch' or
-                            os.environ.get('ODDS_SCHEDULED', '').lower() == 'true') if allow_fetch is None else allow_fetch
+        self.allow_fetch = os.environ.get('ODDS_FETCH_ENABLED', '').lower() == 'true' if allow_fetch is None else allow_fetch
+        self.configured = bool(self.api_key) or os.environ.get('ODDS_CONFIGURED', '').lower() == 'true'
         self.get = get or requests.get
         self.events = None
         self.odds = {}
         self.error = None
         self.credits_remaining = None
+        self.odds_requests = self.credits_used = self.unknown_cost_requests = 0
+        self.requests_blocked = False
 
     def request(self, path, **params):
+        if not self.api_key or not self.allow_fetch or self.requests_blocked:
+            return None
+        billable = path.endswith('/odds')
+        self.odds_requests += int(billable)
+        accounted = False
         try:
             response = self.get(URL + path, params={'apiKey': self.api_key, **params},
                                 timeout=(10, 25), allow_redirects=False)
             # Never propagate requests' errors: they can contain the key in the URL.
-            if response.status_code != 200:
-                self.error = f'Betting feed unavailable (HTTP {response.status_code}).'
-                return None
             remaining = response.headers.get('x-requests-remaining')
             if remaining is not None and str(remaining).isdigit():
                 self.credits_remaining = int(remaining)
+            if billable:
+                cost = response.headers.get('x-requests-last')
+                if cost is not None and str(cost).isdigit():
+                    self.credits_used += int(cost)
+                    accounted = True
+            if response.status_code != 200:
+                self.error = f'Betting feed unavailable (HTTP {response.status_code}).'
+                self.requests_blocked = True
+                return None
             return response.json()
         except Exception:
             self.error = 'Betting feed unavailable (network or response error).'
+            self.requests_blocked = True
             return None
+        finally:
+            if billable and not accounted:
+                self.unknown_cost_requests += 1
+
+    def write_summary(self):
+        lines = ['### Odds API usage', '', f'- Event odds requests: **{self.odds_requests}**.']
+        if self.unknown_cost_requests:
+            lines.append(f'- Confirmed credits: **{self.credits_used}**; cost unknown for {self.unknown_cost_requests} request(s), up to {len(MARKETS)} additional credits each.')
+        else:
+            lines.append(f'- Credits used by this run: **{self.credits_used}**.')
+        if self.credits_remaining is not None:
+            lines.append(f'- Provider-reported credits remaining: **{self.credits_remaining}**.')
+        if not self.allow_fetch:
+            lines.append('- New odds fetches disabled. SportsLine/Fuel refresh normally; fresh cached betting estimates can still be used.')
+        elif not self.api_key:
+            lines.append('- ODDS_API_KEY is missing; no betting requests were made.')
+        if self.error:
+            lines.append('- ' + self.error)
+        lines.append('- Quotes keep their original timestamp and expire after two hours; a normal refresh does not renew them.')
+        print(f'Odds requests: {self.odds_requests}; confirmed credits used: {self.credits_used}; unknown-cost requests: {self.unknown_cost_requests}', flush=True)
+        if os.environ.get('GITHUB_STEP_SUMMARY'):
+            with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as handle:
+                handle.write('\n'.join(lines) + '\n\n')
 
     def matchup(self, event):
         teams = [self.team_names.get(re.sub(r'[^A-Za-z]', '', event.get(k, ''))) for k in ('away_team', 'home_team')]
@@ -250,10 +288,10 @@ class BettingFeed:
                     player['betting'] = estimate
                     player['sources']['betting'] = estimate['points']
         count = sum(p['sources']['betting'] is not None for p in slate['players'])
-        info.update(playerCount=count, status='available' if count else 'not_configured' if not self.api_key else 'unavailable')
+        info.update(playerCount=count, status='available' if count else 'not_configured' if not self.configured else 'unavailable')
         info['message'] = (self.error or ('Betting estimates available; complete, fresh props only.' if count else
-                           'Betting feed not configured. Using available SportsLine / Fuel forecasts.' if not self.api_key else
-                           'Run the refresh workflow manually to fetch betting props.' if not self.allow_fetch else
+                           'Betting feed not configured. Using available SportsLine / Fuel forecasts.' if not self.configured else
+                           'Run Refresh betting odds (manual) to fetch today’s props. SportsLine / Fuel remain available.' if not self.allow_fetch else
                            'No complete, fresh betting estimates matched this slate. Using available SportsLine / Fuel forecasts.'))
         if self.credits_remaining is not None:
             info['creditsRemaining'] = self.credits_remaining

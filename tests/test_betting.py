@@ -36,7 +36,7 @@ def api():
     def get(url, **kwargs):
         calls.append((url, kwargs))
         data = {**event, 'bookmakers': [book()]} if url.endswith('/odds') else [event]
-        return SimpleNamespace(status_code=200, headers={'x-requests-remaining': '400'}, json=lambda: data)
+        return SimpleNamespace(status_code=200, headers={'x-requests-remaining': '400', 'x-requests-last': '9' if url.endswith('/odds') else '0'}, json=lambda: data)
     return get, calls
 
 
@@ -141,3 +141,56 @@ def test_complete_books_are_one_source_and_partial_books_cannot_be_spliced():
         response.json = lambda: data
         return response
     assert BettingFeed(NOW, key, TEAM_NAMES, api_key='key', allow_fetch=True, get=split).attach(slate())['sources']['betting']['playerCount'] == 0
+
+
+@pytest.mark.parametrize('event', ['workflow_dispatch', 'schedule', 'push', 'workflow_call', ''])
+def test_secret_alone_and_legacy_scheduled_switch_never_enable_requests(monkeypatch,event):
+    monkeypatch.setenv('ODDS_API_KEY','TEST_SECRET')
+    monkeypatch.setenv('GITHUB_EVENT_NAME',event)
+    monkeypatch.setenv('ODDS_SCHEDULED','true')
+    monkeypatch.delenv('ODDS_FETCH_ENABLED',raising=False)
+    get,calls=api()
+    feed=BettingFeed(NOW,key,TEAM_NAMES,get=get)
+    result=feed.attach(slate())
+    assert feed.request('/events') is None
+    assert not calls and not feed.allow_fetch
+    assert 'Refresh betting odds (manual)' in result['sources']['betting']['message']
+
+
+def test_explicit_authorization_fetches_once_and_reports_real_cost(monkeypatch,tmp_path):
+    monkeypatch.setenv('ODDS_API_KEY','TEST_SECRET');monkeypatch.setenv('ODDS_FETCH_ENABLED','true')
+    path=tmp_path/'summary';monkeypatch.setenv('GITHUB_STEP_SUMMARY',str(path))
+    get,calls=api();feed=BettingFeed(NOW,key,TEAM_NAMES,get=get)
+    feed.attach(slate());feed.attach(slate('draftkings'));feed.write_summary()
+    assert len(calls)==2 and feed.odds_requests==1 and feed.credits_used==9
+    assert 'Credits used by this run: **9**' in path.read_text()
+    assert 'remaining: **400**' in path.read_text()
+    assert 'TEST_SECRET' not in path.read_text()
+
+
+def test_normal_refresh_reuses_quotes_without_key_or_odds_requests_and_does_not_reset_age(monkeypatch,tmp_path):
+    get,calls=api();previous=BettingFeed(NOW,key,TEAM_NAMES,api_key='TEST_SECRET',allow_fetch=True,get=get).attach(slate())
+    monkeypatch.setenv('ODDS_CONFIGURED','true');monkeypatch.setenv('ODDS_FETCH_ENABLED','false')
+    path=tmp_path/'summary';monkeypatch.setenv('GITHUB_STEP_SUMMARY',str(path))
+    feed=BettingFeed(NOW+timedelta(minutes=30),key,TEAM_NAMES,api_key='',get=get)
+    cached=feed.attach(slate(),previous);feed.write_summary()
+    assert len(calls)==2 and feed.odds_requests==0
+    assert cached['players'][0]['betting']['updatedAt']==STAMP
+    assert 'Credits used by this run: **0**' in path.read_text()
+    later=BettingFeed(NOW+timedelta(minutes=121),key,TEAM_NAMES,api_key='',get=get).attach(slate(),cached)
+    assert later['players'][0]['sources']['betting'] is None
+    assert 'Refresh betting odds (manual)' in later['sources']['betting']['message']
+
+
+def test_failed_request_with_unknown_cost_is_not_claimed_as_free(monkeypatch,tmp_path):
+    get,calls=api()
+    def broken(url,**kwargs):
+        if url.endswith('/odds'):raise RuntimeError('TEST_SECRET')
+        return get(url,**kwargs)
+    path=tmp_path/'summary';monkeypatch.setenv('GITHUB_STEP_SUMMARY',str(path))
+    feed=BettingFeed(NOW,key,TEAM_NAMES,api_key='TEST_SECRET',allow_fetch=True,get=broken)
+    feed.attach(slate());feed.write_summary()
+    assert feed.odds_requests==1 and feed.unknown_cost_requests==1
+    assert 'cost unknown for 1' in path.read_text()
+    assert 'Credits used by this run: **0**' not in path.read_text()
+    assert 'TEST_SECRET' not in path.read_text()

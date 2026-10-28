@@ -460,6 +460,7 @@ def refresh(output, date, contest_id=None):
     catalog={'schemaVersion':1,'date':date,'updatedAt':iso(now),'lastAttemptAt':iso(now),'status':'partial' if discovery_errors else 'ready' if published else 'awaiting',
              'slates':published,'platformErrors':discovery_errors,'refreshIntervalMinutes':15,'repository':config['repository'],
              'message':'Today’s slates have not been released yet. Automatic checks run every 15 minutes.'}
+    betting.write_summary()
     (output/'catalog.json').write_text(json.dumps(catalog,indent=2)+'\n')
     return catalog
 
