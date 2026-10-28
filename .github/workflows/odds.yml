@@ -1,0 +1,23 @@
+name: Refresh betting odds (manual)
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  refresh:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'jimrong79' &&
+      github.actor_id == '14351098' &&
+      github.triggering_actor == 'jimrong79'
+    uses: ./.github/workflows/pages.yml
+    with:
+      fetch_odds: true
+    secrets:
+      ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}

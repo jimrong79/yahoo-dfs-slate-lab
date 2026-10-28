@@ -17,6 +17,8 @@ A personal Yahoo and DraftKings NBA lineup workbench. Select **Yahoo** or **Draf
 
 **Optional 3-source blend:** equal-average the available SportsLine, Fuel, and betting-derived estimates (three, two, or one source). Live betting needs an `ODDS_API_KEY` Actions secret. [Setup, quota controls, and experimental conversion assumptions](docs/betting-blend.md).
 
+**Separate manual odds refresh:** run [Refresh betting odds (manual)](https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/odds.yml) on `main` when you want betting data (for example, 3 p.m. Pacific). It permits one owner-requested attempt per Pacific day and reports credit use. Existing scheduled, push, and manual **Refresh NBA slates and publish** runs continue updating SportsLine/Fuel with **zero Odds API requests**. Betting quotes expire after two hours; normal refreshes never make old quotes look fresh.
+
 ## V1 method
 
 **Yahoo:** the projection is a 50/50 average of SportsLine component-stat forecasts converted to Yahoo scoring and Daily Fantasy Fuel FanDuel projections. NBA Yahoo and FanDuel weights are identical: points + 1.2 rebounds + 1.5 assists + 3 steals + 3 blocks − turnovers. SportsLine's displayed fantasy total is deliberately not used. Both current sources must match the player's team and opponent. Value is fantasy points per salary dollar.
