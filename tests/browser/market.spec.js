@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 import {installFixtures,yahoo,dk} from './fixtures.js';
 
 test.beforeEach(async({page})=>installFixtures(page));
-for(const platform of ['yahoo','draftkings'])test(`Market blend ${platform} displays provenance and generates with three or fewer sources`,async({page},testInfo)=>{
+for(const platform of ['yahoo','draftkings'])test(`3-source blend ${platform} displays provenance and generates with three or fewer sources`,async({page},testInfo)=>{
   const base=structuredClone(platform==='yahoo'?yahoo:dk);
   for(const [i,p] of base.players.entries()){
     if(platform==='draftkings')p.sources.sportsline=p.sources.fuel+4;
@@ -23,7 +23,7 @@ for(const platform of ['yahoo','draftkings'])test(`Market blend ${platform} disp
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
   await page.screenshot({path:`screenshots/market-${platform}-${testInfo.project.name}.png`,fullPage:true});
 });
-test('Market blend without betting key clearly reports fallback coverage',async({page})=>{
+test('3-source blend without betting key clearly reports fallback coverage',async({page})=>{
   await page.goto('./');await page.locator('#projection-select').selectOption('market');
   await expect(page.locator('#projection-status')).toContainText('Betting 0/');
   await expect(page.locator('#projection-status')).toContainText('not configured');
