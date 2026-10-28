@@ -1,6 +1,6 @@
-# Market blend (experimental)
+# 3-source blend (experimental)
 
-Select **Market blend (experimental)** on either Yahoo or DraftKings. Each player uses the equal arithmetic mean of the available SportsLine, Daily Fantasy Fuel, and betting-derived fantasy estimates. Three sources get 1/3 each, two get 1/2 each, one gets full weight. A published zero is a real value. With no available estimate, the player is unavailable; this mode has no private-model points fallback. The existing 50/50, Combined, Fuel default, and Trained model modes retain their recipes.
+Select **3-source blend (experimental)** on either Yahoo or DraftKings. Each player uses the equal arithmetic mean of the available SportsLine, Daily Fantasy Fuel, and betting-derived fantasy estimates. Three sources get 1/3 each, two get 1/2 each, one gets full weight. A published zero is a real value. With no available estimate, the player is unavailable; this mode has no private-model points fallback. The existing 50/50, Combined, Fuel default, and Trained model modes retain their recipes.
 
 The table, lineup, copied text, and CSV identify contributing sources. Minutes still come from SportsLine or a compatible, fresh private-model export. Injury, starter, minutes, salary, roster, and authentication checks still apply.
 
@@ -10,7 +10,7 @@ No working complete no-key feed was confirmed. The adapter targets [The Odds API
 
 1. Obtain your own key from The Odds API. Review its plan and usage terms; the app does not register or buy a plan for you.
 2. In [this repository's Actions secrets](https://github.com/jimrong79/yahoo-dfs-slate-lab/settings/secrets/actions), add `ODDS_API_KEY`. Do not put the key in source, JSON snapshots, browser code, or chat.
-3. Run [Refresh NBA slates and publish](https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/pages.yml) manually, then click Refresh data on the site and choose Market blend.
+3. Run [Refresh NBA slates and publish](https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/pages.yml) manually, then click Refresh data on the site and choose 3-source blend.
 
 By default only a **manual workflow run** fetches new odds. Scheduled and push runs can retain still-fresh derived estimates from the prior published slate, without consuming API credits. Successful event captures are reused for one hour; reuse never changes the original quote timestamp. To opt into fetching during scheduled/push runs, set the Actions repository **variable** `ODDS_SCHEDULED=true`.
 

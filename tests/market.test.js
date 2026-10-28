@@ -44,7 +44,7 @@ test('expired, mismatched, or future betting data is excluded while the remainin
     assert.equal(selected.projection,Math.round((p.sources.sportsline+p.sources.fuel)/2*1000)/1000);
   }
 });
-test('Market blend generates legal Yahoo and DK lineups, preserving other modes and filters',()=>{
+test('3-source blend generates legal Yahoo and DK lineups, preserving other modes and filters',()=>{
   for(const fixture of [yahoo,draftKingsFixture()]){
     const base=addBetting(fixture),now=Date.parse(base.updatedAt)+30000;
     const before=selectProjection(fixture,null,undefined,now);
@@ -61,7 +61,7 @@ test('Market blend generates legal Yahoo and DK lineups, preserving other modes 
     assert.match(playerSourceLabel(healthy),/Betting/);
   }
 });
-test('Market blend can use fresh model minutes but missing minutes still exclude the player',()=>{
+test('3-source blend can use fresh model minutes but missing minutes still exclude the player',()=>{
   const base=addBetting(yahoo),now=Date.parse(base.updatedAt)+30000,model=modelFixture(base);
   const p=base.players.find(p=>!playerProblem(p));p.minutes=null;
   let selected=selectProjection(base,model,'market',now).players.find(x=>x.id===p.id);

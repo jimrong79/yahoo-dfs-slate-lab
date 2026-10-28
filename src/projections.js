@@ -1,6 +1,6 @@
 // Only derived daily predictions are public. The trained models stay private.
-export const projectionLabel = method => ({provider:'Fuel DraftKings (original)',trained:'Trained model (experimental)',combined:'Combined',market:'Market blend (experimental)',consensus:'50/50 consensus'}[method] || 'Daily projections');
-export const sourceLabel = source => ({consensus:'50/50',sportsline:'SportsLine',fuel:'Fuel',betting:'Betting',market:'Market blend',model:'Trained model',unavailable:'Unavailable'}[source] || 'Unavailable');
+export const projectionLabel = method => ({provider:'Fuel DraftKings (original)',trained:'Trained model (experimental)',combined:'Combined',market:'3-source blend (experimental)',consensus:'50/50 consensus'}[method] || 'Daily projections');
+export const sourceLabel = source => ({consensus:'50/50',sportsline:'SportsLine',fuel:'Fuel',betting:'Betting',market:'3-source blend',model:'Trained model',unavailable:'Unavailable'}[source] || 'Unavailable');
 export const playerSourceLabel = p => p.projectionMethod === 'market' ? p.blendSources?.map(sourceLabel).join(' + ') || 'Unavailable' : sourceLabel(p.projectionSource);
 const forecast = value => Number.isFinite(value) && value >= 0;
 const validMinutes = value => Number.isFinite(value) && value >= 0 && value <= 48;
@@ -73,7 +73,7 @@ export function selectProjection(slate, snapshot, method, now = Date.now()) {
   const readiness=method === 'market' ? combinedReady && enoughMarket : method === 'combined' ? combinedReady && enoughCombined : platform === 'draftkings' && method === 'trained' ? combinedReady : method === 'consensus' ? consensusReady : slate.ready;
   return {...slate,players,projectionMethod:method,trainedSnapshot:snapshot,
     combinedReady,consensusReady,ready:readiness,
-    readinessReason:method === 'market' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughMarket ? 'Market blend needs at least eight available forecasts.' : null : method === 'combined' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughCombined ? 'Combined needs at least eight current forecasts from providers or a fresh trained-model export.' : null : method === 'consensus' && !consensusReady ? slate.readinessReason || 'Waiting for both current projection sources.' : slate.readinessReason,
+    readinessReason:method === 'market' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughMarket ? '3-source blend needs at least eight available forecasts.' : null : method === 'combined' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughCombined ? 'Combined needs at least eight current forecasts from providers or a fresh trained-model export.' : null : method === 'consensus' && !consensusReady ? slate.readinessReason || 'Waiting for both current projection sources.' : slate.readinessReason,
     modelFallbackProblem:problem, trainedProblem:problem || coverageProblem,
     model:{id:`${platform}-${method}`,name:projectionLabel(method)}};
 }
