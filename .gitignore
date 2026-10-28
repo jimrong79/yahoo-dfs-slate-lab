@@ -9,3 +9,6 @@ playwright-report/
 screenshots/
 .env
 .env.*
+
+# Personal contest history and local performance reports.
+/contest-history/
