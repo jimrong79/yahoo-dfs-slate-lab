@@ -8,6 +8,7 @@
     "build": "vite build --base=./",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test tests/*.test.js",
+    "results:import": "python3 pipeline/results.py",
     "test:browser": "playwright test"
   },
   "dependencies": {

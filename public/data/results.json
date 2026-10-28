@@ -1,0 +1,303 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-10-28T04:18:41.556358+00:00",
+  "through": "2026-10-27",
+  "seasonStart": "2026-10-20",
+  "currency": "USD",
+  "coverage": [
+    {
+      "platform": "draftkings",
+      "firstDate": "2026-10-22",
+      "lastDate": "2026-10-26",
+      "importedAt": "2026-10-28T04:18:41.556358+00:00"
+    },
+    {
+      "platform": "yahoo",
+      "firstDate": "2026-10-20",
+      "lastDate": "2026-10-27",
+      "importedAt": "2026-10-28T04:18:41.556358+00:00"
+    }
+  ],
+  "daily": [
+    {
+      "date": "2026-10-20",
+      "platform": "yahoo",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 200,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-20",
+      "platform": "yahoo",
+      "contestType": "Tournament",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 100,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-21",
+      "platform": "yahoo",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 1,
+      "feesCents": 200,
+      "payoutsCents": 400,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-21",
+      "platform": "yahoo",
+      "contestType": "Tournament",
+      "entries": 1,
+      "cashed": 1,
+      "feesCents": 100,
+      "payoutsCents": 5000,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-22",
+      "platform": "draftkings",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 1,
+      "feesCents": 200,
+      "payoutsCents": 400,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-22",
+      "platform": "draftkings",
+      "contestType": "Tournament",
+      "entries": 2,
+      "cashed": 2,
+      "feesCents": 200,
+      "payoutsCents": 300,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-22",
+      "platform": "yahoo",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 1,
+      "feesCents": 200,
+      "payoutsCents": 400,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-22",
+      "platform": "yahoo",
+      "contestType": "Tournament",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 100,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-23",
+      "platform": "draftkings",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 200,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-23",
+      "platform": "draftkings",
+      "contestType": "Tournament",
+      "entries": 2,
+      "cashed": 0,
+      "feesCents": 300,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-23",
+      "platform": "yahoo",
+      "contestType": "Double-up",
+      "entries": 2,
+      "cashed": 1,
+      "feesCents": 700,
+      "payoutsCents": 400,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-23",
+      "platform": "yahoo",
+      "contestType": "Tournament",
+      "entries": 4,
+      "cashed": 3,
+      "feesCents": 1200,
+      "payoutsCents": 2300,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-24",
+      "platform": "draftkings",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 500,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-24",
+      "platform": "draftkings",
+      "contestType": "Tournament",
+      "entries": 2,
+      "cashed": 0,
+      "feesCents": 600,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-24",
+      "platform": "yahoo",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 1,
+      "feesCents": 200,
+      "payoutsCents": 400,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-24",
+      "platform": "yahoo",
+      "contestType": "Tournament",
+      "entries": 2,
+      "cashed": 0,
+      "feesCents": 800,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-25",
+      "platform": "draftkings",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 1000,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-25",
+      "platform": "draftkings",
+      "contestType": "Tournament",
+      "entries": 3,
+      "cashed": 1,
+      "feesCents": 1900,
+      "payoutsCents": 8000,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-25",
+      "platform": "yahoo",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 1,
+      "feesCents": 200,
+      "payoutsCents": 400,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-25",
+      "platform": "yahoo",
+      "contestType": "Small-field group",
+      "entries": 1,
+      "cashed": 1,
+      "feesCents": 100,
+      "payoutsCents": 270,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-25",
+      "platform": "yahoo",
+      "contestType": "Tournament",
+      "entries": 2,
+      "cashed": 2,
+      "feesCents": 400,
+      "payoutsCents": 900,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-26",
+      "platform": "draftkings",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 1,
+      "feesCents": 1000,
+      "payoutsCents": 2000,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-26",
+      "platform": "draftkings",
+      "contestType": "Tournament",
+      "entries": 4,
+      "cashed": 3,
+      "feesCents": 1200,
+      "payoutsCents": 2150,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-26",
+      "platform": "yahoo",
+      "contestType": "50/50",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 200,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-26",
+      "platform": "yahoo",
+      "contestType": "Double-up",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 200,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-26",
+      "platform": "yahoo",
+      "contestType": "Tournament",
+      "entries": 6,
+      "cashed": 1,
+      "feesCents": 900,
+      "payoutsCents": 200,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-27",
+      "platform": "yahoo",
+      "contestType": "50/50",
+      "entries": 2,
+      "cashed": 0,
+      "feesCents": 500,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    },
+    {
+      "date": "2026-10-27",
+      "platform": "yahoo",
+      "contestType": "Tournament",
+      "entries": 1,
+      "cashed": 0,
+      "feesCents": 500,
+      "payoutsCents": 0,
+      "ticketCents": 0
+    }
+  ]
+}

@@ -52,7 +52,28 @@ The solver can time out; every returned lineup is independently checked for lega
 
 Snapshots older than two hours, official injury reports older than three hours, and archived dates block generation. Failed platform refreshes preserve that platform's previous per-slate successful timestamps and do not stop the other platform. Partial source availability publishes salaries; generation depends on the selected method's available forecasts and required injury/lineup reports. When no players meet the data checks, the table initially shows the full salary pool. Raw source HTML/PDFs are not published.
 
-## Development and checks
+## Weekly results
+
+[Weekly results](https://jimrong79.github.io/yahoo-dfs-slate-lab/results.html) publishes the owner's approved aggregate NBA results: entry fees, payouts, profit, ROI, cash rate, a cumulative-profit graph, and weekly/contest-type breakdowns. It is public and does not require sign-in. The builder's GitHub authentication is unchanged. No raw exports, entry IDs, contest IDs, player lineups, or account credentials are published.
+
+Each week, download the DraftKings entry-history CSV and Yahoo contest-history CSV into the ignored `contest-history/` folder. Preserve the source headers. Then run:
+
+```sh
+npm run results:import
+npm test
+python3 -m pytest tests/test_results.py -q
+npm run build
+```
+
+The importer recognizes source CSVs by their headers and ignores the derived tracking CSVs in that folder. It reads downloads by modification time, merges by platform plus entry ID, retains prior weeks in the private `contest-history/results-ledger.json`, and applies corrections from newer files. Re-importing overlapping downloads does not add duplicate entries, and an older download cannot overwrite a newer correction. Keep a private backup of the folder; a fresh clone of this public repo does not contain the entry ledger. Explicit inputs can be provided with `python3 pipeline/results.py --input path/to/dk.csv path/to/yahoo.csv`.
+
+Review and commit only `public/data/results.json`, then publish through the existing main-branch Pages workflow. A normal slate refresh preserves this committed report; it does not download account history or spend odds credits to update results. This is a manual weekly import, not an account sync or scheduled reminder.
+
+Tracking starts October 20, 2026. Older seasons and other sports are excluded. The report's default seven-day window ends on the latest recorded settled date; calendar weeks run Monday–Sunday. `--through YYYY-MM-DD` selects an earlier end date, and `--season-start` with a separate `--ledger` starts a new season. Coverage dates are shown per platform; absent records are not verified zero activity. Yahoo unresolved/cancelled entries are excluded, while DraftKings's history export is treated as settled. DraftKings ticket prizes are separate from cash; Yahoo does not distinguish ticket prize value. Entry funding, subscription expenses, model choice and late swaps cannot be inferred from these exports. Contest types are inferred from titles and never treated as projection-mode labels.
+
+The public report contains daily aggregate groups only. Tests check deduplication, settlement corrections, privacy fields, exact cents, report filtering, and financial reconciliation. Browser checks cover both page sizes, public access, filters, chart interactions and errors using synthetic aggregates.
+
+## Development commands
 
 Requires Node 22.23.2+ and Python 3.11+.
 

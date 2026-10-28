@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#163d32" />
+  <meta name="description" content="Weekly aggregate NBA daily fantasy results for Slate Lab: entry fees, payouts, net profit, ROI and cash rate." />
+  <title>Weekly results — Slate Lab</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+</head>
+<body>
+  <div id="app" class="results-app">
+    <aside class="sidebar">
+      <a class="brand" href="./" aria-label="Slate Lab home"><span class="brand-mark">SL<span></span></span><span>slate<span class="brand-light">lab</span><small>YOUR DAILY EDGE</small></span></a>
+      <div class="workspace-label">WORKSPACE</div>
+      <nav aria-label="Main navigation">
+        <a class="nav-item" href="./" aria-label="Lineup builder"><i data-lucide="layout-dashboard"></i>Lineup builder</a>
+        <a class="nav-item active" href="./results.html" aria-current="page" aria-label="Weekly results"><i data-lucide="chart-no-axes-combined"></i>Weekly results<span class="nav-dot"></span></a>
+      </nav>
+      <div class="sidebar-note"><span class="note-icon"><i data-lucide="calendar-days"></i></span><strong>The whole week.<br>Every result.</strong><p>Wins and losses together. Updated from actual contest history.</p></div>
+      <div class="sidebar-bottom"><span class="mini-ball">◉</span><div><strong>NBA results</strong><small>Yahoo · DraftKings</small></div><span class="version">USD</span></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar"><div class="breadcrumb"><span>Workspace</span><i data-lucide="chevron-right"></i><strong>Weekly results</strong></div><a class="results-back" href="./">Lineup builder<i data-lucide="arrow-up-right"></i></a></header>
+      <main>
+        <div class="page-heading"><div><div class="eyebrow">NBA · ACTUAL CONTEST RESULTS</div><h1>Results, week by week<span>.</span></h1><p>A clear record of entry fees, payouts and everything in between.</p></div><span class="report-badge"><i data-lucide="chart-no-axes-combined"></i>Public summary</span></div>
+        <div id="results-state" class="results-state" role="status">Loading the latest results…</div>
+        <button id="results-retry" class="button secondary" hidden>Try again</button>
+        <div id="results-content" hidden>
+          <div class="results-toolbar">
+            <label>Period<select id="results-period" aria-label="Results period"></select></label>
+            <label>Platform<select id="results-platform" aria-label="Results platform"><option value="all">Yahoo + DraftKings</option><option value="yahoo">Yahoo</option><option value="draftkings">DraftKings</option></select></label>
+            <div class="report-date"><strong id="results-through"></strong><span id="results-updated"></span></div>
+          </div>
+          <p class="coverage-note" id="results-coverage"></p>
+          <section class="results-metrics" aria-label="Selected period summary">
+            <article class="metric-card metric-profit"><span>NET PROFIT</span><strong id="result-profit">—</strong><small id="result-roi">—</small></article>
+            <article class="metric-card"><span>ENTRY FEES</span><strong id="result-fees">—</strong><small id="result-entries">—</small></article>
+            <article class="metric-card"><span>PAYOUTS</span><strong id="result-payouts">—</strong><small>Before external data costs</small></article>
+            <article class="metric-card"><span>CASH RATE</span><strong id="result-cash-rate">—</strong><small id="result-cashes">—</small></article>
+          </section>
+          <div id="results-empty" class="results-state" hidden>No imported entries match this selection.</div>
+          <section class="card profit-card" aria-labelledby="profit-title">
+            <div class="result-card-heading"><div><div class="eyebrow" id="selected-period-range">THE SELECTED PERIOD</div><h2 id="profit-title">Cumulative profit</h2><p>Running total of payouts minus entry fees. Starts at zero for each selection.</p></div><span class="chart-key"><span></span>Net profit</span></div>
+            <div id="profit-chart" class="profit-chart"></div>
+            <div id="chart-detail" class="chart-detail" aria-live="polite"></div>
+          </section>
+          <div class="results-tables">
+            <section class="card result-table-card" aria-labelledby="format-title"><div class="result-card-heading"><div><h2 id="format-title">By contest type</h2><p>Within the selected period and platform.</p></div></div><div class="result-table-scroll"><table><thead><tr><th scope="col">CONTEST TYPE</th><th scope="col">CASHED / ENTRIES</th><th scope="col">NET PROFIT</th><th scope="col">ROI</th></tr></thead><tbody id="results-types"></tbody></table></div></section>
+            <section class="card result-table-card" aria-labelledby="weekly-title"><div class="result-card-heading"><div><h2 id="weekly-title">Weekly history</h2><p>All imported weeks for the selected platform. Monday–Sunday.</p></div></div><div class="result-table-scroll"><table><thead><tr><th scope="col">WEEK</th><th scope="col">ENTRIES</th><th scope="col">NET PROFIT</th><th scope="col">ROI</th></tr></thead><tbody id="results-weeks"></tbody></table></div></section>
+          </div>
+          <details class="card results-details"><summary>Daily totals and how to read these results</summary><div class="result-table-scroll"><table><caption>Selected period · USD</caption><thead><tr><th scope="col">DATE</th><th scope="col">ENTRIES</th><th scope="col">FEES</th><th scope="col">PAYOUTS</th><th scope="col">NET PROFIT</th></tr></thead><tbody id="results-daily"></tbody></table></div><div class="results-method"><p>Net profit = payouts − recorded entry fees. ROI = net profit ÷ entry fees. Cash rate = entries with a positive cash payout ÷ entries. A payout does not necessarily mean that entry made a profit.</p><p>Missing dates mean no imported records, not verified zero activity. Platform exports can end on different dates. Entry fees may include promotional or ticket-funded entries. DraftKings ticket prizes are tracked separately from cash payouts; Yahoo does not distinguish ticket value in this export. External data and subscription expenses are excluded.</p><p>Contest types describe payout formats. “50/50” here is not a projection-mode label. The exports do not identify the model used, and entries from the same slate can be correlated. These results do not establish a lasting advantage or predict future returns.</p><p id="ticket-note"></p></div></details>
+          <div class="results-update-note"><i data-lucide="calendar-days"></i><p>Updated weekly from downloaded contest history. Only aggregate results are published; raw exports, entry IDs and lineups stay private.</p></div>
+        </div>
+        <footer class="page-footer"><span>Slate Lab · Personal results, published in aggregate</span><a href="./">Back to lineup builder <i data-lucide="arrow-up-right"></i></a></footer>
+      </main>
+    </div>
+  </div>
+  <script type="module" src="/src/results.js"></script>
+</body>
+</html>
