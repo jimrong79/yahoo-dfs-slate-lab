@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import csv
 import io
 import pytest
-from pipeline.refresh import parse_sportsline, parse_fuel, parse_starters, make_slate, key, discover, discover_draftkings, make_draftkings_slate, refresh
+from pipeline.refresh import parse_sportsline, parse_fuel, parse_starters, make_slate, key, discover, discover_draftkings, make_draftkings_slate, refresh, fetch, apply_source_health
 
 def yahoo_lobby():
     import json
@@ -209,3 +209,83 @@ def test_platform_failures_keep_previous_slate_timestamps(monkeypatch,tmp_path):
     result=refresh(tmp_path,date)
     assert result['status']=='partial' and result['slates']==old['slates']
     assert json.loads((tmp_path/(date+'-dk-123.json')).read_text())==snapshot
+
+
+@pytest.mark.parametrize('fault', ['timeout', 'connection', 429, 500, 502, 503, 504])
+def test_public_feed_retries_transient_failures_then_recovers(monkeypatch, fault):
+    import requests
+    calls, sleeps = [], []
+    def get(url, **kwargs):
+        calls.append(url)
+        if len(calls) < 3:
+            if fault == 'timeout': raise requests.ReadTimeout('temporary')
+            if fault == 'connection': raise requests.ConnectionError('temporary')
+        response = requests.Response()
+        response.status_code = fault if isinstance(fault, int) and len(calls) < 3 else 200
+        return response
+    monkeypatch.setattr('pipeline.refresh.requests.get', get)
+    monkeypatch.setattr('pipeline.refresh.time.sleep', sleeps.append)
+    assert fetch('https://www.dailyfantasyfuel.com/fixture').status_code == 200
+    assert len(calls) == 3 and sleeps == [1, 2]
+
+
+@pytest.mark.parametrize('status,expected_calls', [(404, 1), (403, 1), (503, 3)])
+def test_public_feed_retries_are_bounded_and_do_not_retry_permanent_errors(monkeypatch, status, expected_calls):
+    import requests
+    calls = []
+    def get(*args, **kwargs):
+        calls.append(1)
+        response = requests.Response(); response.status_code = status
+        return response
+    monkeypatch.setattr('pipeline.refresh.requests.get', get)
+    monkeypatch.setattr('pipeline.refresh.time.sleep', lambda _: None)
+    with pytest.raises(requests.HTTPError): fetch('https://www.dailyfantasyfuel.com/fixture')
+    assert len(calls) == expected_calls
+
+
+@pytest.mark.parametrize('failed_source', ['fuel', 'fuel_dk', 'sportsline'])
+def test_refresh_publishes_feed_failure_guard_and_isolates_platforms(monkeypatch, tmp_path, failed_source):
+    import json
+    from types import SimpleNamespace
+    import pipeline.refresh as module
+    yahoo, dk = list(slate_inputs()), list(draftkings_inputs())
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None): return yahoo[8]
+    monkeypatch.setattr(module, 'datetime', FrozenDateTime)
+    monkeypatch.setattr(module, 'discover', lambda *a: [{'seriesId':'1','contestId':'2','gameCount':1,'firstTip':'2026-10-21T23:00:00Z'}])
+    monkeypatch.setattr(module, 'discover_draftkings', lambda *a: dk[0])
+    monkeypatch.setattr(module, 'store', lambda *a: yahoo[0])
+    marker = {'fuel':'/fanduel/', 'fuel_dk':'/draftkings/', 'sportsline':'sportsline.com'}[failed_source]
+    def get(url):
+        if marker in url: raise TimeoutError('provider timed out')
+        text = yahoo[1] if 'contestPlayers' in url else dk[1] if 'getavailableplayerscsv' in url else ''
+        return SimpleNamespace(text=text, json=lambda: {})
+    monkeypatch.setattr(module, 'fetch', get)
+    sports = {**yahoo[2], **dk[2]}
+    for p in sports.values(): p['draftkings_points'] = 50
+    monkeypatch.setattr(module, 'parse_sportsline', lambda _: sports)
+    monkeypatch.setattr(module, 'parse_fuel', lambda h, d, p: (yahoo[3] if p == 'fanduel' else dk[3], yahoo[9]))
+    monkeypatch.setattr(module, 'parse_starters', lambda *a: dk[4])
+    monkeypatch.setattr(module, 'latest_injuries', lambda *a: ({}, dk[6], yahoo[9], 'https://example.com/injuries'))
+    monkeypatch.setenv('ODDS_FETCH_ENABLED', 'false')
+    refresh(tmp_path, yahoo[7])
+    for platform, filename in [('yahoo','2026-10-21-1.json'), ('draftkings','2026-10-21-dk-123.json')]:
+        result = json.loads((tmp_path / filename).read_text())
+        failed = failed_source == 'sportsline' or failed_source == ('fuel' if platform == 'yahoo' else 'fuel_dk')
+        assert result['sourceHealth']['status'] == ('unavailable' if failed else 'ready')
+        if failed:
+            assert not result['ready'] and not result['combinedReady'] and not result['consensusReady']
+            assert 'generation is paused' in result['combinedReadinessReason']
+            if failed_source != 'sportsline':
+                assert all(not p['providerFlagsClear'] and not p['providerClear'] for p in result['players'])
+        else:
+            assert result['combinedReady']
+
+
+def test_healthy_feed_with_one_missing_player_retains_combined_fallback():
+    args = list(slate_inputs()); args[4][('player0','GSW')] = 'projected'
+    del args[3][('player0','GSW')]
+    result = apply_source_health(make_slate(*args))
+    assert result['sourceHealth']['status'] == 'ready' and result['combinedReady']
+    assert result['players'][0]['providerFlagsClear']

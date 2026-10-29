@@ -10,12 +10,15 @@ import os
 from pathlib import Path
 import re
 from statistics import median
+from zoneinfo import ZoneInfo
 
 import requests
 
 URL = 'https://api.the-odds-api.com/v4/sports/basketball_nba'
 DOCS = 'https://the-odds-api.com/sports-odds-data/betting-markets.html'
 METHOD = 'devig-poisson-v1'
+EVENT_TOLERANCE_SECONDS = 15 * 60
+EASTERN = ZoneInfo('America/New_York')
 WEIGHTS = {
     'yahoo': {'points': 1, 'rebounds': 1.2, 'assists': 1.5, 'steals': 3, 'blocks': 3, 'turnovers': -1},
     'draftkings': {'points': 1, 'rebounds': 1.25, 'assists': 1.5, 'steals': 2, 'blocks': 2, 'turnovers': -.5, 'threes': .5},
@@ -139,6 +142,8 @@ class BettingFeed:
         self.configured = bool(self.api_key) or os.environ.get('ODDS_CONFIGURED', '').lower() == 'true'
         self.get = get or requests.get
         self.events = None
+        self.event_requests = 0
+        self.event_checks = {}
         self.odds = {}
         self.error = None
         self.credits_remaining = None
@@ -149,6 +154,7 @@ class BettingFeed:
         if not self.api_key or not self.allow_fetch or self.requests_blocked:
             return None
         billable = path.endswith('/odds')
+        self.event_requests += int(path == '/events')
         self.odds_requests += int(billable)
         accounted = False
         try:
@@ -177,7 +183,9 @@ class BettingFeed:
                 self.unknown_cost_requests += 1
 
     def write_summary(self):
-        lines = ['### Odds API usage', '', f'- Event odds requests: **{self.odds_requests}**.']
+        lines = ['### Odds API usage', '',
+                 f'- Event discovery requests: **{self.event_requests}** (quota-free); events returned: **{len(self.events or [])}**.',
+                 f'- Event odds requests: **{self.odds_requests}**.']
         if self.unknown_cost_requests:
             lines.append(f'- Confirmed credits: **{self.credits_used}**; cost unknown for {self.unknown_cost_requests} request(s), up to {len(MARKETS)} additional credits each.')
         else:
@@ -190,22 +198,47 @@ class BettingFeed:
             lines.append('- ODDS_API_KEY is missing; no betting requests were made.')
         if self.error:
             lines.append('- ' + self.error)
+        if self.event_checks:
+            lines.extend(['', '| Game | Slate tipoff (UTC) | Match result | Odds result | Candidate starts (UTC) |',
+                          '| --- | --- | --- | --- | --- |'])
+            for check in self.event_checks.values():
+                lines.append(f'| {check["game"]} | {check["tipoff"]} | {check["status"]} | {check.get("oddsStatus", "not requested")} | {", ".join(check["candidateStarts"])} |')
         lines.append('- Quotes keep their original timestamp and expire after two hours; a normal refresh does not renew them.')
         print(f'Odds requests: {self.odds_requests}; confirmed credits used: {self.credits_used}; unknown-cost requests: {self.unknown_cost_requests}', flush=True)
+        print('\n'.join(lines), flush=True)
         if os.environ.get('GITHUB_STEP_SUMMARY'):
             with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as handle:
                 handle.write('\n'.join(lines) + '\n\n')
 
     def matchup(self, event):
-        teams = [self.team_names.get(re.sub(r'[^A-Za-z]', '', event.get(k, ''))) for k in ('away_team', 'home_team')]
+        teams = [self.team_names.get(re.sub(r'[^A-Za-z0-9]', '', event.get(k, ''))) for k in ('away_team', 'home_team')]
         return '@'.join(teams) if all(teams) else None
+
+    def matches_game(self, event, game):
+        tip, start = stamp(game.get('tipoff')), stamp(event.get('commence_time'))
+        return (tip is not None and start is not None and self.matchup(event) == game['matchup'] and
+                abs(start - tip) <= EVENT_TOLERANCE_SECONDS and
+                datetime.fromtimestamp(start, EASTERN).date() == datetime.fromtimestamp(tip, EASTERN).date())
 
     def event_for(self, game):
         if self.events is None:
             payload = self.request('/events')
-            self.events = payload if isinstance(payload, list) else []
-        matches = [e for e in self.events if self.matchup(e) == game['matchup'] and stamp(e.get('commence_time')) == stamp(game['tipoff'])]
-        return matches[0] if len(matches) == 1 else None
+            valid = isinstance(payload, list) and all(isinstance(e, dict) for e in payload)
+            self.events = payload if valid else []
+            if payload is not None and not valid:
+                self.error = 'Betting event discovery returned an unsupported response.'
+        candidates = [e for e in self.events if self.matchup(e) == game['matchup']]
+        matches = [e for e in candidates if self.matches_game(e, game)]
+        status = ('matched' if len(matches) == 1 else 'ambiguous_events' if matches else
+                  'tipoff_mismatch' if candidates else 'matchup_missing' if self.events else 'no_events')
+        event = matches[0] if len(matches) == 1 else None
+        if event and not re.fullmatch(r'[a-zA-Z0-9_-]{1,100}', str(event.get('id', ''))):
+            event, status = None, 'invalid_event_id'
+        self.event_checks[(game['matchup'], game['tipoff'])] = {
+            'game': game['matchup'], 'tipoff': game['tipoff'], 'status': status,
+            'candidateStarts': sorted({datetime.fromtimestamp(stamp(e['commence_time']), timezone.utc).isoformat().replace('+00:00', 'Z')
+                                       for e in candidates if stamp(e.get('commence_time')) is not None})}
+        return event
 
     def attach(self, slate, previous=None):
         try:
@@ -216,9 +249,13 @@ class BettingFeed:
             for player in slate['players']:
                 player.pop('betting', None)
                 player['sources']['betting'] = None
+            self.error = 'Betting response could not be validated. Using available SportsLine / Fuel forecasts.'
             slate['sources']['betting'] = {'url': DOCS, 'capturedAt': self.now.isoformat(),
                 'status': 'unavailable', 'playerCount': 0, 'method': METHOD, 'experimental': True,
-                'message': 'Betting response could not be validated. Using available SportsLine / Fuel forecasts.'}
+                'message': self.error}
+            if self.api_key and self.allow_fetch:
+                slate['sources']['betting']['lastAttempt'] = {'at': self.now.isoformat().replace('+00:00', 'Z'),
+                    'playerCount': 0, 'message': self.error, 'status': 'invalid_response'}
             return slate
 
     def _attach(self, slate, previous=None):
@@ -229,6 +266,8 @@ class BettingFeed:
                 'status': 'unavailable', 'method': METHOD, 'experimental': True}
         if previous and previous.get('date') == slate['date'] and previous.get('platform') == platform:
             info['eventCaptures'] = {k: v for k, v in previous.get('sources', {}).get('betting', {}).get('eventCaptures', {}).items() if fresh(v, self.now, 60)}
+            if previous.get('sources', {}).get('betting', {}).get('lastAttempt'):
+                info['lastAttempt'] = previous['sources']['betting']['lastAttempt']
         slate['sources']['betting'] = info
         for player in slate['players']:
             player['sources']['betting'] = None
@@ -237,6 +276,7 @@ class BettingFeed:
             if estimate and all(old.get(k) == player.get(k) for k in ('name', 'team', 'opponent', 'game', 'tipoff')) and valid_estimate(estimate, player, platform, self.now):
                 player['betting'] = estimate
                 player['sources']['betting'] = estimate['points']
+        checks = []
         if self.api_key and self.allow_fetch:
             for game in slate['games']:
                 if stamp(game['tipoff']) is None or stamp(game['tipoff']) <= self.now.timestamp():
@@ -247,19 +287,25 @@ class BettingFeed:
                 previous_capture = (previous or {}).get('sources', {}).get('betting', {}).get('eventCaptures', {}).get(game['matchup'])
                 if previous_capture and fresh(previous_capture, self.now, 60):
                     info.setdefault('eventCaptures', {})[game['matchup']] = previous_capture
+                    checks.append({'game': game['matchup'], 'tipoff': game['tipoff'], 'status': 'cached_capture'})
                     continue
                 event = self.event_for(game)
-                if not event or not re.fullmatch(r'[a-zA-Z0-9_-]{1,100}', str(event.get('id', ''))):
+                check = self.event_checks[(game['matchup'], game['tipoff'])]
+                checks.append(check)
+                if not event:
                     continue
                 event_id = event['id']
                 if event_id not in self.odds:
                     if self.credits_remaining is not None and self.credits_remaining < len(MARKETS):
                         self.error = 'Betting feed quota is too low for a complete refresh.'
+                        check['oddsStatus'] = 'quota_low'
                         continue
                     self.odds[event_id] = self.request(f'/events/{event_id}/odds', regions='us', markets=','.join(MARKETS), oddsFormat='decimal')
                 data = self.odds[event_id]
-                if not isinstance(data, dict) or data.get('id') != event_id or self.matchup(data) != game['matchup'] or stamp(data.get('commence_time')) != stamp(game['tipoff']):
+                if not isinstance(data, dict) or data.get('id') != event_id or not self.matches_game(data, game):
+                    check['oddsStatus'] = 'unavailable_or_invalid_response'
                     continue
+                check['oddsStatus'] = 'validated'
                 info.setdefault('eventCaptures', {})[game['matchup']] = info['capturedAt']
                 # A newer successful event response supersedes cached player quotes,
                 # including withdrawn/incomplete props. Failed fetches retain only fresh cache.
@@ -288,10 +334,22 @@ class BettingFeed:
                     player['betting'] = estimate
                     player['sources']['betting'] = estimate['points']
         count = sum(p['sources']['betting'] is not None for p in slate['players'])
+        if self.api_key and self.allow_fetch:
+            matched = sum(c['status'] in {'matched', 'cached_capture'} for c in checks)
+            result_message = (self.error or ('Betting estimates available; complete, fresh props only.' if count else
+                              'No upcoming games to fetch for this slate.' if not checks else
+                              f'No matching betting events for {len(checks)} upcoming games; no player odds fetched for this slate.' if not matched else
+                              f'Matched {matched}/{len(checks)} upcoming games, but no complete, fresh player estimates matched this slate.'))
+            info['lastAttempt'] = {'at': info['capturedAt'], 'eventsListed': len(self.events or []),
+                                   'gamesConsidered': len(checks), 'gamesMatched': matched,
+                                   'playerCount': count, 'message': result_message,
+                                   'games': [dict(c) for c in checks]}
         info.update(playerCount=count, status='available' if count else 'not_configured' if not self.configured else 'unavailable')
         info['message'] = (self.error or ('Betting estimates available; complete, fresh props only.' if count else
+                           f'Last manual attempt {info["lastAttempt"]["at"]}: {info["lastAttempt"]["message"]} Cached quotes may have expired; normal refreshes do not fetch new odds.' if info.get('lastAttempt') and not self.allow_fetch else
                            'Betting feed not configured. Using available SportsLine / Fuel forecasts.' if not self.configured else
                            'Run Refresh betting odds (manual) to fetch today’s props. SportsLine / Fuel remain available.' if not self.allow_fetch else
+                           info['lastAttempt']['message'] if info.get('lastAttempt') else
                            'No complete, fresh betting estimates matched this slate. Using available SportsLine / Fuel forecasts.'))
         if self.credits_remaining is not None:
             info['creditsRemaining'] = self.credits_remaining

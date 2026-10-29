@@ -126,6 +126,7 @@ def test_failed_or_unmatched_feed_is_unavailable_without_affecting_other_provide
         return response
     result = BettingFeed(NOW, key, TEAM_NAMES, api_key='TEST_SECRET', allow_fetch=True, get=broken).attach(base)
     assert all(p['sources'] == {'sportsline': 40, 'fuel': 42, 'betting': None} for p in result['players'])
+    assert result['sources']['betting']['lastAttempt']['playerCount'] == 0
     assert 'TEST_SECRET' not in json.dumps(result)
 
 
@@ -179,7 +180,8 @@ def test_normal_refresh_reuses_quotes_without_key_or_odds_requests_and_does_not_
     assert 'Credits used by this run: **0**' in path.read_text()
     later=BettingFeed(NOW+timedelta(minutes=121),key,TEAM_NAMES,api_key='',get=get).attach(slate(),cached)
     assert later['players'][0]['sources']['betting'] is None
-    assert 'Refresh betting odds (manual)' in later['sources']['betting']['message']
+    assert 'Last manual attempt' in later['sources']['betting']['message']
+    assert later['sources']['betting']['lastAttempt']['at'] == previous['sources']['betting']['lastAttempt']['at']
 
 
 def test_failed_request_with_unknown_cost_is_not_claimed_as_free(monkeypatch,tmp_path):
@@ -194,3 +196,73 @@ def test_failed_request_with_unknown_cost_is_not_claimed_as_free(monkeypatch,tmp
     assert 'cost unknown for 1' in path.read_text()
     assert 'Credits used by this run: **0**' not in path.read_text()
     assert 'TEST_SECRET' not in path.read_text()
+
+
+@pytest.mark.parametrize('offset', [-15, -10, 0, 10, 15])
+def test_event_matching_accepts_small_provider_start_offsets_and_keeps_slate_tip(offset):
+    get, calls = api()
+    def shifted(url, **kwargs):
+        response = get(url, **kwargs); data = response.json()
+        events = data if isinstance(data, list) else [data]
+        for event in events:
+            event['commence_time'] = (datetime.fromisoformat(TIP.replace('Z', '+00:00')) + timedelta(minutes=offset)).isoformat()
+        response.json = lambda: data
+        return response
+    feed = BettingFeed(NOW, key, TEAM_NAMES, api_key='TEST_SECRET', allow_fetch=True, get=shifted)
+    for platform in ('yahoo', 'draftkings'):
+        result = feed.attach(slate(platform))
+        assert result['sources']['betting']['playerCount'] == 1
+        assert result['players'][0]['betting']['tipoff'] == TIP
+        assert result['sources']['betting']['lastAttempt']['gamesMatched'] == 1
+    assert len(calls) == 2 and feed.event_requests == 1 and feed.odds_requests == 1
+
+
+def test_philadelphia_76ers_match_without_dropping_digits():
+    get, calls = api()
+    def sixers(url, **kwargs):
+        response = get(url, **kwargs); data = response.json()
+        for event in data if isinstance(data, list) else [data]:
+            event.update(away_team='Philadelphia 76ers', home_team='Indiana Pacers')
+        response.json = lambda: data
+        return response
+    base = slate(); base['games'][0]['matchup'] = 'PHI@IND'
+    base['players'][0].update(team='IND', opponent='PHI', game='PHI@IND')
+    result = BettingFeed(NOW, key, TEAM_NAMES, api_key='TEST_SECRET', allow_fetch=True, get=sixers).attach(base)
+    assert len(calls) == 2 and result['sources']['betting']['playerCount'] == 1
+
+
+@pytest.mark.parametrize('fault,status', [('far_time','tipoff_mismatch'), ('other_date','tipoff_mismatch'),
+                                        ('reverse_teams','matchup_missing'), ('duplicate','ambiguous_events'),
+                                        ('empty','no_events'), ('schema','no_events')])
+def test_unmatched_events_report_reason_and_never_spend_odds_credits(monkeypatch, tmp_path, fault, status):
+    get, calls = api()
+    def unmatched(url, **kwargs):
+        assert not url.endswith('/odds')
+        response = get(url, **kwargs); data = response.json()
+        if fault == 'far_time': data[0]['commence_time'] = '2026-10-28T00:00:00Z'
+        if fault == 'other_date': data[0]['commence_time'] = '2026-10-28T23:30:00Z'
+        if fault == 'reverse_teams': data[0]['away_team'], data[0]['home_team'] = data[0]['home_team'], data[0]['away_team']
+        if fault == 'duplicate': data.append({**data[0], 'id':'another'})
+        if fault == 'empty': data = []
+        if fault == 'schema': data = {'bad':'TEST_SECRET'}
+        response.json = lambda: data
+        return response
+    summary = tmp_path / 'summary'; monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(summary))
+    feed = BettingFeed(NOW, key, TEAM_NAMES, api_key='TEST_SECRET', allow_fetch=True, get=unmatched)
+    result = feed.attach(slate()); feed.write_summary()
+    attempt = result['sources']['betting']['lastAttempt']
+    assert attempt['gamesMatched'] == 0 and attempt['games'][0]['status'] == status
+    assert len(calls) == 1 and feed.odds_requests == 0 and feed.credits_used == 0
+    assert status in summary.read_text() and 'Event discovery requests: **1**' in summary.read_text()
+    assert 'TEST_SECRET' not in summary.read_text() + json.dumps(result)
+    # Scheduled refreshes preserve the failed attempt instead of implying it never ran.
+    cached = BettingFeed(NOW+timedelta(minutes=30), key, TEAM_NAMES, api_key='', allow_fetch=False).attach(slate(), result)
+    assert cached['sources']['betting']['lastAttempt'] == attempt
+    assert 'Last manual attempt' in cached['sources']['betting']['message']
+
+
+def test_nearby_but_different_eastern_date_is_rejected():
+    feed = BettingFeed(NOW, key, TEAM_NAMES, api_key='', allow_fetch=False)
+    game = {'matchup':'SAC@SAS', 'tipoff':'2026-10-28T03:55:00Z'}
+    event = {'away_team':'Sacramento Kings', 'home_team':'San Antonio Spurs', 'commence_time':'2026-10-28T04:05:00Z'}
+    assert not feed.matches_game(event, game)
