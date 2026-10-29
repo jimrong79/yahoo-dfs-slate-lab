@@ -14,6 +14,7 @@ import math
 from pathlib import Path
 import re
 import sys
+import time
 import unicodedata
 from zoneinfo import ZoneInfo
 from urllib.parse import urlparse
@@ -53,9 +54,41 @@ def fetch(url):
     # DraftKings' public feeds accept the library's normal python-requests
     # identification. No browser impersonation, session cookies, or login.
     headers={} if urlparse(url).hostname in {'api.draftkings.com','www.draftkings.com'} else {'User-Agent':'SlateLab/1.0 public NBA slate research'}
-    response = requests.get(url, timeout=(10, 30), headers=headers)
-    response.raise_for_status()
-    return response
+    for attempt in range(3):
+        try:
+            response = requests.get(url, timeout=(10, 30), headers=headers)
+            response.raise_for_status()
+            return response
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt == 2:
+                raise
+        except requests.HTTPError as exc:
+            if attempt == 2 or exc.response.status_code not in {429, 500, 502, 503, 504}:
+                raise
+        time.sleep(attempt + 1)
+
+
+def apply_source_health(slate):
+    """A failed whole feed is not ordinary missing coverage for one player.
+
+    All generation modes consume these readiness fields on the authenticated
+    server. Never turn a failed injury-flag feed into permission to select players.
+    """
+    errors = slate.get('sourceErrors', {})
+    failed = [name for name in ('sportsline', 'fuel') if name in errors or (name == 'fuel' and 'fuel_dk' in errors)]
+    slate['sourceHealth'] = {'status': 'unavailable' if failed else 'ready', 'failedSources': failed}
+    if not failed:
+        return slate
+    names = ' and '.join({'sportsline': 'SportsLine', 'fuel': 'Fantasy Fuel'}[name] for name in failed)
+    message = (f'{names} feed unavailable. Lineup generation is paused because projections or injury flags are incomplete. '
+               'Run the refresh workflow, then click Refresh data after it succeeds.')
+    slate['sourceHealth']['message'] = message
+    slate.update(ready=False, consensusReady=False, combinedReady=False,
+                 readinessReason=message, combinedReadinessReason=message)
+    if 'fuel' in failed:
+        for player in slate['players']:
+            player['providerClear'] = player['providerFlagsClear'] = False
+    return slate
 
 def store(html, name):
     marker = '"' + name + '":'
@@ -421,6 +454,7 @@ def refresh(output, date, contest_id=None):
             old_path=output/filename
             try:old=json.loads(old_path.read_text()) if old_path.exists() else None
             except (ValueError,OSError):old=None
+            apply_source_health(slate)
             betting.attach(slate,old)
             (output/filename).write_text(json.dumps(slate,ensure_ascii=False,allow_nan=False,separators=(',',':'))+'\n')
             published.append({**meta,'platform':slate['platform'],'date':date,'file':filename,'ready':slate['ready'],'playerCount':len(slate['players'])})

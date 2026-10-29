@@ -46,9 +46,10 @@ function updateStatus() {
   $('app').dataset.projection = state.slate?.projectionMethod || 'consensus';
   const problem = slateProblem(state.slate);
   const failed = state.catalog?.status === 'refresh_failed' || state.catalog?.platformErrors?.[rules().id];
-  const warning = [problem, failed ? 'The last automatic refresh failed. Showing the previous snapshot; check its time before using it.' : ''].filter(Boolean).join(' ');
+  const feedFailure = state.slate?.sourceHealth?.status === 'unavailable' ? state.slate.sourceHealth.message : '';
+  const warning = [...new Set([problem, feedFailure, failed ? 'The last automatic refresh failed. Showing the previous snapshot; check its time before using it.' : ''].filter(Boolean))].join(' ');
   $('notice').hidden = !warning; $('notice').textContent = warning; $('notice').classList.toggle('error', !!problem);
-  $('snapshot-help').hidden = !(/snapshot|official injury report|automatic refresh/.test(warning) && !/trained-model/.test(warning));
+  $('snapshot-help').hidden = !(/snapshot|official injury report|automatic refresh|feed unavailable/.test(warning) && !/trained-model/.test(warning));
   const hasSlate = !!state.slate;
   $('projection-controls').hidden = !hasSlate;
   const methods = rules().id === 'draftkings' ? [['provider','Fuel DraftKings (original default)']] : [];
@@ -82,7 +83,7 @@ function updateStatus() {
   $('generate').disabled = state.busy || !authReady || (signedIn && (!!problem || state.loading));
   $('generate').innerHTML = state.busy ? `${icon('refresh-cw')}Building your lineup…` : `${icon('wand-sparkles')}Generate lineup${icon('arrow-right')}`;
   if (state.busy) $('generate').querySelector('i')?.classList.add('spin');
-  $('top-status').textContent = state.loading ? 'Loading slate' : problem ? 'Check slate status' : 'Slate ready';
+  $('top-status').textContent = state.loading ? 'Loading slate' : feedFailure ? 'Projection feed unavailable' : problem ? 'Check slate status' : 'Slate ready';
   $('refresh').disabled = state.loading;
   $('slate-select').disabled = state.loading;
   if (state.slate) {
