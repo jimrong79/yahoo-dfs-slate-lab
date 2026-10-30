@@ -7,7 +7,7 @@ for(const platform of ['yahoo','draftkings'])test(`3-source blend ${platform} di
   for(const [i,p] of base.players.entries()){
     if(platform==='draftkings')p.sources.sportsline=p.sources.fuel+4;
     p.sources.betting=30;
-    p.betting={points:30,platform,game:p.game,tipoff:p.tipoff,updatedAt:base.updatedAt,method:'devig-poisson-v1',complete:true};
+    p.betting={points:30,platform,game:p.game,tipoff:p.tipoff,updatedAt:base.updatedAt,method:'prop-lines-v2',complete:true};
     if(i%3===1){p.sources.sportsline=null;p.sources.betting=null;}
     if(i%3===2)p.sources.betting=null;
   }
@@ -62,4 +62,33 @@ test('3-source blend explains an unsuccessful manual attempt after a normal refr
   await page.goto('./');await page.locator('#projection-select').selectOption('market');
   await expect(page.locator('#projection-status')).toContainText('Last manual attempt');
   await expect(page.locator('#projection-status')).toContainText('no player odds fetched');
+});
+
+test('missing markets display unavailable rather than zero and explain the missing components',async({page})=>{
+  const base=structuredClone(dk);
+  base.players.forEach(p=>{
+    p.sources.betting=null;
+    p.bettingStatus={method:'prop-lines-v2',status:'unavailable',message:'No complete bookmaker forecast. Closest is missing usable triple-double, turnovers.'};
+  });
+  await page.route(`**/data/${base.date}-${base.id}.json*`,route=>route.fulfill({json:base}));
+  await page.goto('./?platform=draftkings');await page.locator('#projection-select').selectOption('market');
+  const cell=page.locator('.projection-cell').first();
+  await expect(cell).toHaveAttribute('title',/Betting: —/);
+  await expect(cell).toHaveAttribute('title',/missing usable triple-double, turnovers/);
+  await expect(page.locator('#projection-status')).toContainText('Betting 0/');
+});
+
+test('Yes-only bonus estimates disclose bookmaker margin and the method explains missing data',async({page})=>{
+  const base=structuredClone(dk);
+  base.players.forEach(p=>{
+    p.sources.betting=30;
+    p.betting={points:30,platform:'draftkings',game:p.game,tipoff:p.tipoff,updatedAt:base.updatedAt,method:'prop-lines-v2',complete:true,
+      bonusProbabilityMethods:{double_double:['yes_only_implied'],triple_double:['devigged']}};
+  });
+  await page.route(`**/data/${base.date}-${base.id}.json*`,route=>route.fulfill({json:base}));
+  await page.goto('./?platform=draftkings');await page.locator('#projection-select').selectOption('market');
+  await expect(page.locator('.projection-cell').first()).toHaveAttribute('title',/Yes-only odds; bookmaker margin remains/);
+  await page.locator('#help-button').click();
+  await expect(page.locator('#modal')).toContainText('Missing or unusable markets stay unavailable, never zero.');
+  await expect(page.locator('#modal')).toContainText('published stat lines are used directly');
 });

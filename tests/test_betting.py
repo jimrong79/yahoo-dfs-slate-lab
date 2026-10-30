@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from pipeline.betting import BettingFeed, MARKETS, book_estimates, fair_probability, mean_from_prop, poisson_cdf
+from pipeline.betting import BettingFeed, MARKETS, METHOD, WEIGHTS, book_estimates, fair_probability, stat_line, bonus_probability
 from pipeline.refresh import key, TEAM_NAMES
 
 NOW = datetime(2026, 10, 27, 20, tzinfo=timezone.utc)
@@ -40,27 +40,40 @@ def api():
     return get, calls
 
 
-def test_devig_and_poisson_inverse_are_explicit_mean_estimates():
+def test_bonus_probabilities_preserve_provenance_and_missing_quotes():
     assert fair_probability(1.9, 1.9) == .5
-    assert mean_from_prop(.5, 1.9, 1.9) == pytest.approx(.6931471805599453)
-    assert poisson_cdf(24, mean_from_prop(24.5, 1.8, 2.1)) == pytest.approx(fair_probability(2.1, 1.8))
-    for line, over, under in [(2, 1.9, 1.9), (-.5, 2, 2), (float('nan'), 2, 2), (.5, 0, 2), (.5, True, 2)]:
-        assert mean_from_prop(line, over, under) is None
+    assert bonus_probability([{'name':'Yes','price':5}]) == (.2, 'yes_only_implied')
+    assert bonus_probability([{'name':'Yes','price':3}, {'name':'No','price':1.5}]) == (1/3, 'devigged')
+    for outcomes in [[], [{'name':'No','price':2}], [{'name':'Yes','price':None}],
+                     [{'name':'Yes','price':True}], [{'name':'Yes','price':1}],
+                     [{'name':'Yes','price':2}, {'name':'No','price':None}],
+                     [{'name':'Yes','price':2}, {'name':'Yes','price':2}]]:
+        assert bonus_probability(outcomes) is None
+
+
+def test_stat_lines_are_used_directly_including_real_zero_and_integer_lines():
+    for line in [0, .5, 10, 24.5]:
+        quote = {'name':'Over', 'point':line, 'price':1.9}
+        assert stat_line([quote]) == line
+        assert stat_line([quote, {**quote, 'name':'Under', 'price':2.05}]) == line
+    for line in [None, '0', False, float('nan'), float('inf'), -1]:
+        assert stat_line([{'name':'Over','point':line,'price':2}]) is None
+    assert stat_line([]) is None
+    assert stat_line([{'name':'Over','price':2}]) is None
 
 
 def test_platform_scoring_includes_dk_expected_bonus_not_threshold_bonus():
-    means = {k: mean_from_prop(v, 1.9, 1.9) for k, v in LINES.items()}
+    means = LINES
     yahoo = means['points'] + 1.2*means['rebounds'] + 1.5*means['assists'] + 3*means['steals'] + 3*means['blocks'] - means['turnovers']
     dk = means['points'] + 1.25*means['rebounds'] + 1.5*means['assists'] + 2*means['steals'] + 2*means['blocks'] - .5*means['turnovers'] + .5*means['threes'] + 1.5*fair_probability(3, 1.5) + 3*fair_probability(10, 1.1)
     assert book_estimates(book(), 'yahoo', NOW, key)['testplayer']['points'] == pytest.approx(yahoo)
     assert book_estimates(book(), 'draftkings', NOW, key)['testplayer']['points'] == pytest.approx(dk)
 
 
-@pytest.mark.parametrize('fault', ['missing_turnovers', 'single_side', 'different_line', 'stale', 'future', 'duplicate'])
+@pytest.mark.parametrize('fault', ['missing_turnovers', 'different_line', 'stale', 'future', 'duplicate'])
 def test_partial_malformed_or_stale_props_never_become_zero(fault):
     b = book()
     if fault == 'missing_turnovers': b['markets'] = [m for m in b['markets'] if m['key'] != 'player_turnovers']
-    if fault == 'single_side': b['markets'][0]['outcomes'].pop()
     if fault == 'different_line': b['markets'][0]['outcomes'][1]['point'] = 30.5
     if fault == 'stale': b['markets'][0]['last_update'] = (NOW-timedelta(hours=3)).isoformat()
     if fault == 'future': b['markets'][0]['last_update'] = (NOW+timedelta(minutes=6)).isoformat()
@@ -72,6 +85,93 @@ def test_dk_requires_bonus_probs_but_yahoo_does_not():
     b = book(); b['markets'] = b['markets'][:-2]
     assert book_estimates(b, 'yahoo', NOW, key)
     assert not book_estimates(b, 'draftkings', NOW, key)
+
+
+@pytest.mark.parametrize('platform,kind', [(platform, kind) for platform, weights in WEIGHTS.items()
+    for kind in [*weights, *(['double_double', 'triple_double'] if platform == 'draftkings' else [])]])
+def test_each_required_market_is_missing_not_zero(platform, kind):
+    b = book(); diagnostics = {}
+    b['markets'] = [m for m in b['markets'] if m['key'] != 'player_' + kind]
+    assert not book_estimates(b, platform, NOW, key, diagnostics)
+    assert diagnostics['testplayer'] == {'status': 'incomplete', 'missingMarkets': [kind],
+                                        'issues': {kind: 'missing_market'}}
+
+
+def test_single_stat_sides_and_yes_only_bonuses_produce_labeled_dk_estimate():
+    b = book()
+    for market in b['markets']:
+        market['outcomes'] = market['outcomes'][:1]
+    estimate = book_estimates(b, 'draftkings', NOW, key)['testplayer']
+    expected = sum(LINES[k] * w for k, w in WEIGHTS['draftkings'].items()) + 1.5 / 3 + 3 / 10
+    assert estimate['points'] == pytest.approx(expected)
+    assert estimate['bonusProbabilityMethods'] == {'double_double': 'yes_only_implied', 'triple_double': 'yes_only_implied'}
+
+
+@pytest.mark.parametrize('point', [None, False, '0', 0])
+def test_only_actual_numeric_zero_is_usable_as_a_stat(point):
+    b = book(); diagnostics = {}
+    for outcome in b['markets'][3]['outcomes']:
+        outcome['point'] = point
+    result = book_estimates(b, 'yahoo', NOW, key, diagnostics)
+    if type(point) is int:
+        expected = sum(LINES[k] * w for k, w in WEIGHTS['yahoo'].items()) - 3 * LINES['steals']
+        assert result['testplayer']['points'] == expected
+    else:
+        assert not result
+        assert diagnostics['testplayer']['issues'] == {'steals': 'invalid_or_ambiguous_line'}
+
+
+def test_no_only_and_inconsistent_bonus_odds_are_not_zero_or_partial_totals():
+    b = book(); diagnostics = {}
+    b['markets'][-1]['outcomes'] = b['markets'][-1]['outcomes'][1:]
+    assert not book_estimates(b, 'draftkings', NOW, key, diagnostics)
+    assert diagnostics['testplayer']['issues'] == {'triple_double': 'invalid_or_missing_yes_odds'}
+    b = book()
+    b['markets'][-1]['outcomes'] = [{'name': 'Yes', 'description': 'Test Player', 'price': 2}]
+    assert not book_estimates(b, 'draftkings', NOW, key, diagnostics)
+    assert diagnostics['testplayer']['status'] == 'invalid_bonus_probabilities'
+
+
+def test_missing_markets_are_reported_without_publishing_raw_quotes(monkeypatch, tmp_path):
+    get, calls = api()
+    def partial(url, **kwargs):
+        response = get(url, **kwargs); data = response.json()
+        if url.endswith('/odds'):
+            data['bookmakers'][0]['markets'] = [m for m in data['bookmakers'][0]['markets']
+                if m['key'] not in {'player_turnovers', 'player_triple_double'}]
+        response.json = lambda: data
+        return response
+    summary = tmp_path / 'summary'; monkeypatch.setenv('GITHUB_STEP_SUMMARY', str(summary))
+    feed = BettingFeed(NOW, key, TEAM_NAMES, api_key='TEST_SECRET', allow_fetch=True, get=partial)
+    result = feed.attach(slate('draftkings')); feed.write_summary()
+    p = result['players'][0]
+    assert p['sources'] == {'sportsline': 40, 'fuel': 42, 'betting': None}
+    assert 'betting' not in p
+    assert p['bettingStatus']['missingMarkets'] == ['triple_double', 'turnovers']
+    assert 'triple-double, turnovers' in p['bettingStatus']['message']
+    assert result['sources']['betting']['lastAttempt']['coverage'][0]['missingMarkets'] == {'triple_double': 1, 'turnovers': 1}
+    assert '0/1 complete player estimates' in summary.read_text()
+    assert 'turnovers: 1' in summary.read_text()
+    serialized = json.dumps(result)
+    for forbidden in ['TEST_SECRET', '"outcomes"', '"price"', '"point"']:
+        assert forbidden not in serialized
+    later = BettingFeed(NOW+timedelta(minutes=30), key, TEAM_NAMES, api_key='', allow_fetch=False, get=partial).attach(slate('draftkings'), result)
+    assert later['players'][0]['bettingStatus'] == p['bettingStatus']
+    assert len(calls) == 2
+
+
+def test_legacy_estimate_cannot_be_reused_or_relabeled_as_direct_lines():
+    get, calls = api()
+    previous = BettingFeed(NOW, key, TEAM_NAMES, api_key='key', allow_fetch=True, get=get).attach(slate())
+    previous['players'][0]['betting']['method'] = 'devig-poisson-v1'
+    previous['sources']['betting']['method'] = 'devig-poisson-v1'
+    cached = BettingFeed(NOW, key, TEAM_NAMES, api_key='', allow_fetch=False, get=get).attach(slate(), previous)
+    assert cached['players'][0]['sources']['betting'] is None
+    assert 'betting' not in cached['players'][0]
+    assert not cached['sources']['betting'].get('eventCaptures')
+    fresh = BettingFeed(NOW, key, TEAM_NAMES, api_key='key', allow_fetch=True, get=get).attach(slate(), cached)
+    assert len(calls) == 4
+    assert fresh['players'][0]['betting']['method'] == METHOD
 
 
 def test_live_adapter_reuses_one_event_fetch_across_platforms_and_never_publishes_key():
