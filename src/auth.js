@@ -1,4 +1,4 @@
-export const API_ORIGIN = 'https://jimrong79-slate-lab-api.nuttymap66.chatgpt.site';
+export const API_ORIGIN = 'https://jimrong79-slate-lab-api.jimrong79.chatgpt.site';
 export const CONTACT_EMAIL = 'jimrong79@gmail.com';
 const SESSION_KEY='slatelab-auth-v1', VERIFIER_KEY='slatelab-auth-verifier-v1';
 let session=null;
