@@ -106,7 +106,7 @@ The frontend contains no optimizer worker or fallback generation path.
 
 For credential rotation and backend maintenance, follow
 `yahoo-dfs-auth/AUTH-SETUP.md`. The backend is
-`https://jimrong79-slate-lab-api.nuttymap66.chatgpt.site`. Keep backend source modules
+`https://jimrong79-slate-lab-api.jimrong79.chatgpt.site`. Keep backend source modules
 in sync when changing the optimizer, eligibility, platform or projection code.
 Public projections and previously published code remain public; access controls
 protect this hosted generation service, not independently copied implementations.

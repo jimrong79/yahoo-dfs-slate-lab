@@ -10,7 +10,7 @@ function addBetting(base){
   base=structuredClone(base);
   for(const p of base.players){
     p.sources.betting=30;
-    p.betting={points:30,platform:base.platform||'yahoo',game:p.game,tipoff:p.tipoff,updatedAt:base.updatedAt,method:'devig-poisson-v1',complete:true};
+    p.betting={points:30,platform:base.platform||'yahoo',game:p.game,tipoff:p.tipoff,updatedAt:base.updatedAt,method:'prop-lines-v2',complete:true};
   }
   return base;
 }
@@ -36,13 +36,23 @@ test('valid zero counts as a source; NaN, negatives, and incomplete betting esti
   assert.equal(selectProjection(base,null,'market',now).players[0].projection,null);
 });
 test('expired, mismatched, or future betting data is excluded while the remaining providers work',()=>{
-  for(const patch of [{updatedAt:'invalid'},{updatedAt:'2020-01-01T00:00:00Z'},{updatedAt:'2099-01-01T00:00:00Z'},{platform:'draftkings'},{game:'WRONG'},{tipoff:'wrong'},{points:999}]){
+  for(const patch of [{updatedAt:'invalid'},{updatedAt:'2020-01-01T00:00:00Z'},{updatedAt:'2099-01-01T00:00:00Z'},{platform:'draftkings'},{game:'WRONG'},{tipoff:'wrong'},{points:999},{method:'devig-poisson-v1'},{complete:false},{points:null}]){
     const base=addBetting(yahoo),now=Date.parse(base.updatedAt)+30000,p=base.players[0];
     p.betting={...p.betting,...patch};
     const selected=selectProjection(base,null,'market',now).players[0];
     assert.deepEqual(selected.blendSources,['sportsline','fuel']);
     assert.equal(selected.projection,Math.round((p.sources.sportsline+p.sources.fuel)/2*1000)/1000);
   }
+});
+test('missing betting totals do not dilute the provider average with false zeroes',()=>{
+  const base=addBetting(yahoo),now=Date.parse(base.updatedAt)+30000,p=base.players[0];
+  p.sources={sportsline:40,fuel:50,betting:null};delete p.betting;
+  const selected=selectProjection(base,null,'market',now).players[0];
+  assert.equal(selected.projection,45);assert.equal(selected.bettingProjection,null);
+  assert.deepEqual(selected.blendSources,['sportsline','fuel']);
+  p.sources={sportsline:null,fuel:null,betting:0};
+  p.betting={points:0,platform:'yahoo',game:p.game,tipoff:p.tipoff,updatedAt:base.updatedAt,method:'prop-lines-v2',complete:true};
+  assert.equal(selectProjection(base,null,'market',now).players[0].projection,0);
 });
 test('3-source blend generates legal Yahoo and DK lineups, preserving other modes and filters',()=>{
   for(const fixture of [yahoo,draftKingsFixture()]){

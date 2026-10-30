@@ -7,7 +7,7 @@ const validMinutes = value => Number.isFinite(value) && value >= 0 && value <= 4
 
 export function bettingForecast(p, platform, now) {
   const b=p.betting, updated=Date.parse(b?.updatedAt);
-  return b?.complete === true && b.method === 'devig-poisson-v1' && b.platform === platform &&
+  return b?.complete === true && b.method === 'prop-lines-v2' && b.platform === platform &&
     b.game === p.game && b.tipoff === p.tipoff && forecast(b.points) && b.points === p.sources?.betting &&
     Number.isFinite(updated) && now-updated <= 120*60000 && updated <= now+300000 ? b.points : null;
 }

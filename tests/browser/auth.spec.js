@@ -2,6 +2,17 @@ import {test,expect} from '@playwright/test';
 import {installFixtures} from './fixtures.js';
 import {API_ORIGIN} from '../../src/auth.js';
 test.beforeEach(async({page})=>{await installFixtures(page);});
+test('GitHub sign-in starts directly on the canonical API host with a browser challenge',async({page})=>{
+  await page.addInitScript(()=>sessionStorage.removeItem('slatelab-auth-v1'));
+  await page.route(`${API_ORIGIN}/api/health`,route=>route.fulfill({json:{ok:true,authConfigured:true},headers:{'access-control-allow-origin':'*'}}));
+  await page.route(`${API_ORIGIN}/api/auth/github?*`,route=>route.fulfill({body:'Synthetic sign-in endpoint'}));
+  await page.goto('./?platform=draftkings');
+  await page.locator('#auth-button').click();
+  await expect(page).toHaveURL(new RegExp(`${API_ORIGIN.replaceAll('.','\\.').replaceAll('/','\\/')}/api/auth/github\\?`));
+  const url=new URL(page.url());
+  expect(url.searchParams.get('challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(url.searchParams.get('platform')).toBe('draftkings');
+});
 test('visitors can browse, but Generate opens the access popup without a build request',async({page})=>{
   await page.addInitScript(()=>sessionStorage.removeItem('slatelab-auth-v1'));
   let builds=0;page.on('request',r=>{if(r.url().includes('/api/generate'))builds++;});
