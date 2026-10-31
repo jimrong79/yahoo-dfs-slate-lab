@@ -1,5 +1,5 @@
-// Derived fantasy-point contributions, never raw bookmaker odds. A hybrid
-// replaces the SportsLine contribution; it is not a third independent source.
+// Derived fantasy-point contributions, never raw bookmaker odds. This adjusted
+// forecast shares provider inputs wherever betting categories are missing.
 export const componentLabel = kind => ({points:'PTS',rebounds:'REB',assists:'AST',steals:'STL',blocks:'BLK',turnovers:'TO',dk_extras:'3PM + DD/TD'}[kind] || kind);
 const baseKinds = ['points','rebounds','assists','steals','blocks','turnovers'];
 const fresh = (value, now) => Number.isFinite(Date.parse(value)) && Date.parse(value) <= now+300000 && now-Date.parse(value) <= 120*60000;
@@ -36,6 +36,8 @@ export function hybridExplanation(p) {
   const d=p.hybridDetails;
   if (!d?.used.length) return d?.reason || 'Hybrid components unavailable.';
   return `Betting: ${d.used.map(componentLabel).join(', ')}. SportsLine retained: ${d.provider.map(componentLabel).join(', ') || 'none'}.`+
-    (p.hybridSources?.includes('fuel') ? ' Averaged with Fuel; SportsLine is not counted again.' : ' No Fuel forecast; hybrid used alone.')+
+    (p.projectionMethod==='market' && p.blendSources?.includes('betting_filled')
+      ? ' Betting (provider-filled) is averaged with the original SportsLine and Fuel forecasts when available. Each estimate gets equal weight. Missing categories share SportsLine inputs; these are not three independent forecasts.'
+      : p.hybridSources?.includes('fuel') ? ' Averaged with Fuel; SportsLine is not counted again.' : ' No Fuel forecast; hybrid used alone.')+
     (d.yesOnly ? ' DD/TD includes Yes-only implied probabilities; bookmaker margin remains.' : '');
 }

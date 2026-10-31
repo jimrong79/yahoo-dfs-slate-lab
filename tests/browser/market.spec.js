@@ -92,3 +92,41 @@ test('Yes-only bonus estimates disclose bookmaker margin and the method explains
   await expect(page.locator('#modal')).toContainText('Missing or unusable markets stay unavailable, never zero.');
   await expect(page.locator('#modal')).toContainText('published stat lines are used directly');
 });
+
+for(const platform of ['yahoo','draftkings'])test(`${platform} adds filled betting as a third estimate and preserves Combined`,async({page},testInfo)=>{
+  const base=structuredClone(platform==='yahoo'?yahoo:dk);
+  for(const p of base.players){
+    p.sources={sportsline:40,fuel:50,betting:null};p.projection=45;p.consensusProjection=45;
+    p.sportslineComponents={method:'provider-components-v1',platform,game:p.game,tipoff:p.tipoff,updatedAt:base.updatedAt,total:40,
+      values:{points:20,rebounds:6,assists:12,steals:3,blocks:3,turnovers:-4,...(platform==='draftkings'?{dk_extras:0}:{})}};
+    p.bettingComponents={method:'prop-components-v1',platform,game:p.game,tipoff:p.tipoff,values:{points:{points:28,updatedAt:base.updatedAt}}};
+  }
+  // A missing quote must not manufacture a third provider-only estimate.
+  base.players[0].bettingComponents.values={};
+  await page.route(`**/data/${base.date}-${base.id}.json*`,route=>route.fulfill({json:base}));
+  await page.goto(`./?platform=${platform}`);await page.locator('#projection-select').selectOption('combined');
+  await expect(page.locator('.projection-cell').first()).toContainText('45.0');
+  await page.locator('#projection-select').selectOption('market');
+  await expect(page.locator('#projection-status')).toContainText(`${base.players.length-1} provider-filled`);
+  await expect(page.locator('#projection-status')).toContainText('2 sources: 1');
+  const cell=page.locator('.projection-cell').filter({has:page.locator('[data-hybrid]')}).first();
+  await expect(cell).toContainText('46.0');
+  await expect(cell).toContainText('SportsLine + Fuel + Betting (provider-filled)');
+  await expect(cell).toHaveAttribute('title',/Betting \(provider-filled\): 48.0/);
+  await page.locator('[data-hybrid]').first().click();
+  await expect(page.locator('#modal-content')).toContainText('Betting: PTS.');
+  await expect(page.locator('#modal-content')).toContainText('original SportsLine and Fuel');
+  await expect(page.locator('#modal-content')).toContainText('not three independent forecasts');
+  await expect(page.locator('#modal-content')).toContainText('SportsLine retained: REB, AST, STL, BLK, TO');
+  await page.keyboard.press('Escape');await page.locator('#generate').click();
+  await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  await expect(page.locator('.lineup-row').first()).toContainText('SportsLine + Fuel + Betting (provider-filled)');
+  const download=page.waitForEvent('download');await page.locator('#download-lineup').click();
+  const file=await download;const stream=await file.createReadStream();let csv='';for await(const chunk of stream)csv+=chunk;
+  expect(csv).toContain('Betting (provider-filled)');expect(csv).toContain('SportsLine retained:');
+  expect(csv).toContain('original SportsLine and Fuel');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  await page.screenshot({path:`screenshots/market-filled-${platform}-${testInfo.project.name}.png`,fullPage:true});
+  await page.locator('#projection-select').selectOption('combined');
+  await expect(page.locator('.projection-cell').first()).toContainText('45.0');
+});

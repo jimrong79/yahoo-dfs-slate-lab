@@ -1,7 +1,7 @@
 // Only derived daily predictions are public. The trained models stay private.
 import {hybridSportsline} from './hybrid.js';
 export const projectionLabel = method => ({provider:'Fuel DraftKings (original)',trained:'Trained model (experimental)',combined:'Combined',market:'3-source blend (experimental)',hybrid:'Betting hybrid (experimental)',consensus:'50/50 consensus'}[method] || 'Daily projections');
-export const sourceLabel = source => ({consensus:'50/50',sportsline:'SportsLine',fuel:'Fuel',betting:'Betting',market:'3-source blend',hybrid:'Betting/SportsLine hybrid',model:'Trained model',unavailable:'Unavailable'}[source] || 'Unavailable');
+export const sourceLabel = source => ({consensus:'50/50',sportsline:'SportsLine',fuel:'Fuel',betting:'Betting',betting_filled:'Betting (provider-filled)',market:'3-source blend',hybrid:'Betting/SportsLine hybrid',model:'Trained model',unavailable:'Unavailable'}[source] || 'Unavailable');
 export const playerSourceLabel = p => ['market','hybrid'].includes(p.projectionMethod) ? (p.projectionMethod==='hybrid' ? p.hybridSources : p.blendSources)?.map(sourceLabel).join(' + ') || 'Unavailable' : sourceLabel(p.projectionSource);
 const forecast = value => Number.isFinite(value) && value >= 0;
 const validMinutes = value => Number.isFinite(value) && value >= 0 && value <= 48;
@@ -51,10 +51,15 @@ export function selectProjection(slate, snapshot, method, now = Date.now()) {
     const sportsline = forecast(p.sources?.sportsline) ? p.sources.sportsline : null;
     const fuel = forecast(p.sources?.fuel) ? p.sources.fuel : null;
     const betting = bettingForecast(p, platform, now);
-    const blendEntries = [['sportsline',sportsline],['fuel',fuel],['betting',betting]].filter(([,value])=>value !== null);
+    const hybridDetails=hybridSportsline(p,platform,now);
+    // Keep the original providers as separate estimates. Prefer a complete
+    // betting forecast; otherwise use the explicitly labeled provider-filled
+    // estimate only when it contains at least one fresh betting contribution.
+    const marketBettingProjection=betting ?? hybridDetails.points;
+    const marketBettingSource=betting !== null ? 'betting' : hybridDetails.points !== null ? 'betting_filled' : null;
+    const blendEntries = [['sportsline',sportsline],['fuel',fuel],[marketBettingSource,marketBettingProjection]].filter(([,value])=>value !== null);
     const blendSources = blendEntries.map(([name])=>name);
     const marketProjection = blendEntries.length ? Math.round(blendEntries.reduce((sum,[,value])=>sum+value,0)/blendEntries.length*1000)/1000 : null;
-    const hybridDetails=hybridSportsline(p,platform,now);
     const hybridEntries=[[hybridDetails.points !== null ? 'hybrid' : 'sportsline',hybridDetails.points ?? sportsline],['fuel',fuel]].filter(([,v])=>v!==null);
     const hybridSources=hybridEntries.map(([name])=>name);
     const hybridProjection=hybridEntries.length ? Math.round(hybridEntries.reduce((sum,[,v])=>sum+v,0)/hybridEntries.length*1000)/1000 : null;
@@ -64,7 +69,7 @@ export function selectProjection(slate, snapshot, method, now = Date.now()) {
     const combinedProjection = combinedSource === 'consensus' ? forecast(consensusProjection) ? consensusProjection : Math.round((sportsline+fuel)/2*1000)/1000 : sportsline ?? fuel ?? modelProjection;
     const useModelMinutes = (method === 'combined' && (combinedSource === 'model' || !validMinutes(sportslineMinutes))) || (['market','hybrid'].includes(method) && !validMinutes(sportslineMinutes)) || (platform === 'draftkings' && method === 'trained');
     const minutes = useModelMinutes ? modelMinutes : sportslineMinutes;
-    return {...p, consensusProjection, combinedProjection, combinedSource, marketProjection, blendSources, bettingProjection:betting, hybridDetails, hybridSources, hybridProjection, modelProjection, modelMinutes, sportslineMinutes,
+    return {...p, consensusProjection, combinedProjection, combinedSource, marketProjection, blendSources, bettingProjection:betting, marketBettingProjection, marketBettingSource, hybridDetails, hybridSources, hybridProjection, modelProjection, modelMinutes, sportslineMinutes,
       modelAvailable, projectionMethod:method,
       projectionSource:method === 'hybrid' ? hybridSources.length ? 'hybrid' : 'unavailable' : method === 'market' ? blendSources.length ? 'market' : 'unavailable' : method === 'provider' ? fuel !== null ? 'fuel' : 'unavailable' : method === 'combined' ? combinedSource : method === 'trained' ? modelAvailable ? 'model' : 'unavailable' : forecast(consensusProjection) ? 'consensus' : 'unavailable',
       minutes, minutesSource:validMinutes(minutes) ? useModelMinutes ? 'model' : 'sportsline' : 'unavailable',
@@ -93,7 +98,7 @@ export function lineupModelProblem(slate, lineup, now = Date.now()) {
 
 export function lineupBettingProblem(slate, lineup, now = Date.now()) {
   if (lineup?.some(p => p.projectionMethod === 'market' && p.blendSources?.includes('betting') && bettingForecast(p, slate.platform || 'yahoo', now) === null)) return 'Betting quotes used by this lineup have expired. Generate again with the available sources.';
-  if (lineup?.some(p => p.projectionMethod === 'hybrid' && p.hybridDetails?.used.length && JSON.stringify(hybridSportsline(p,slate.platform || 'yahoo',now).quotes)!==JSON.stringify(p.hybridDetails.quotes))) return 'Betting components used by this lineup have expired. Generate again with the available sources.';
+  if (lineup?.some(p => (p.projectionMethod === 'hybrid' || (p.projectionMethod === 'market' && p.blendSources?.includes('betting_filled'))) && p.hybridDetails?.used.length && JSON.stringify(hybridSportsline(p,slate.platform || 'yahoo',now).quotes)!==JSON.stringify(p.hybridDetails.quotes))) return 'Betting components used by this lineup have expired. Generate again with the available sources.';
   return null;
 }
 
