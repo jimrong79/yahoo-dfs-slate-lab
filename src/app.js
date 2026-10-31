@@ -5,6 +5,7 @@ import { currentSession, initializeAuth, signIn, signOut, generateAuthenticated,
 import { platformRules, money } from './platforms.js';
 import { defaultBuildSettings } from './build-settings.js';
 import { selectProjection, projectionLabel, sourceLabel, playerSourceLabel, comparisonTotals, lineupModelProblem, lineupBettingProblem } from './projections.js';
+import {hybridExplanation} from './hybrid.js';
 
 const icons = { LayoutDashboard, Bookmark, ChartNoAxesCombined, Sparkles, ChevronRight, CircleHelp, RefreshCw, CalendarDays, ChevronDown, SlidersHorizontal, Search, LockKeyhole, Ban, Info, ArrowUpRight, ShieldCheck, WandSparkles, ArrowRight, Copy, Download, X, Check };
 const $ = id => document.getElementById(id);
@@ -53,14 +54,17 @@ function updateStatus() {
   const hasSlate = !!state.slate;
   $('projection-controls').hidden = !hasSlate;
   const methods = rules().id === 'draftkings' ? [['provider','Fuel DraftKings (original default)']] : [];
-  methods.push(['consensus',`50/50 consensus${rules().id === 'yahoo' ? ' (default)' : ''}`],['combined','Combined'],['market','3-source blend (experimental)'],['trained','Trained model (experimental)']);
+  methods.push(['consensus',`50/50 consensus${rules().id === 'yahoo' ? ' (default)' : ''}`],['combined','Combined'],['market','3-source blend (experimental)'],['hybrid','Betting hybrid (experimental)'],['trained','Trained model (experimental)']);
   $('projection-select').innerHTML = methods.map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
   $('projection-select').disabled = state.loading;
   $('projection-select').value = state.projectionMethod;
   if (hasSlate) {
     const ml = state.modelSnapshot;
     const unavailable = state.slate.trainedProblem;
-    if (state.projectionMethod === 'market') {
+    if (state.projectionMethod === 'hybrid') {
+      const count=state.slate.players.filter(p=>p.hybridDetails.used.length).length;
+      $('projection-status').textContent = `Betting contributes to ${count}/${state.slate.players.length} players. Missing categories retain SportsLine estimates; the hybrid replaces SportsLine in its blend with Fuel. ${count ? 'See Stat sources for each player.' : 'Using available provider totals. New betting components require your manual odds workflow; old snapshots cannot supply them.'} Eligibility filters still apply.`;
+    } else if (state.projectionMethod === 'market') {
       const counts = [3,2,1,0].map(n=>`${n} sources: ${state.slate.players.filter(p=>p.blendSources.length===n).length}`).join(' · ');
       const bettingCount=state.slate.players.filter(p=>p.blendSources.includes('betting')).length;
       const feedStatus=!bettingCount && state.slate.sources?.betting?.playerCount > 0 ? 'Betting quotes have expired or no longer match. Using available SportsLine / Fuel forecasts.' : state.slate.sources?.betting?.message || 'Betting feed not configured. Using available SportsLine / Fuel forecasts.';
@@ -74,6 +78,7 @@ function updateStatus() {
       $('projection-status').textContent = unavailable || `Model trained through ${ml.trainedThrough} · Inputs ${time(ml.inputsAt)} PT · ${state.slate.players.filter(p=>p.modelAvailable).length}/${state.slate.players.length} players matched`;
     }
     $('projection-status').title = state.projectionMethod === 'market' ? 'Equal average of available SportsLine, Fuel, and complete betting-derived fantasy estimates. No model points fallback. Model minutes can be used when SportsLine minutes are missing.' : 'Model snapshots are generated privately. Refreshing public data does not refresh the trained model.';
+    if (state.projectionMethod==='hybrid') $('projection-status').title='One SportsLine forecast with available categories replaced by betting, averaged with Fuel when available. Missing is never zero. No additional independent third forecast.';
   }
   $('model-label').textContent = state.slate?.model?.name || 'Daily projections';
   const signedIn=!!currentSession();
@@ -174,15 +179,20 @@ function renderPool() {
   $('position-tabs').innerHTML = ['ALL', 'PG', 'SG', 'SF', 'PF', 'C'].map(pos => `<button data-position="${pos}" class="${state.position === pos ? 'active' : ''}" aria-pressed="${state.position === pos}">${pos === 'ALL' ? 'All' : pos}</button>`).join('');
   $('players-body').innerHTML = filtered.length ? filtered.map(p => {
     const locked = state.locked.has(p.id), excluded = state.excluded.has(p.id), problem = problemForPlayer(p);
-    const comparison = `<small class="alt-projection">${['combined','market'].includes(state.projectionMethod) ? esc(playerSourceLabel(p)) : state.projectionMethod === 'trained' ? '50/50 ' + number(p.consensusProjection) : 'ML ' + number(p.modelProjection)}</small>`;
+    const comparison = `<small class="alt-projection">${['combined','market','hybrid'].includes(state.projectionMethod) ? esc(playerSourceLabel(p)) : state.projectionMethod === 'trained' ? '50/50 ' + number(p.consensusProjection) : 'ML ' + number(p.modelProjection)}</small>`;
     const minutesCell = `${number(p.minutes)}${p.minutesSource === 'model' ? '<small class="alt-projection">Model min</small>' : ''}`;
+    const hybridButton = state.projectionMethod==='hybrid' ? `<button class="hybrid-details" data-hybrid="${esc(p.id)}" aria-label="Stat sources for ${esc(p.name)}">Stat sources</button>` : '';
     const bettingDetail = p.bettingProjection !== null && Number.isFinite(p.bettingProjection)
       ? Object.values(p.betting?.bonusProbabilityMethods || {}).some(v=>v.includes('yes_only_implied')) ? 'Bonus probabilities include Yes-only odds; bookmaker margin remains.' : 'Betting projection uses published stat lines.'
       : p.bettingStatus?.status === 'unavailable' ? p.bettingStatus.message : 'Betting estimate unavailable or expired.';
     const shortStatus = ['Out','Doubtful','Questionable','Unknown'].includes(p.injury) ? p.injury : '';
-    return `<tr class="player-row ${locked ? 'locked' : ''} ${excluded ? 'excluded' : ''}" data-player-id="${esc(p.id)}" title="${esc(problem || `${p.starterStatus} starter · ${p.injury}`)}"><td><button class="row-action ${locked ? 'locked' : ''}" data-lock="${esc(p.id)}" aria-label="${locked ? 'Unlock' : 'Lock'} ${esc(p.name)}" aria-pressed="${locked}" ${problem && !locked ? 'disabled' : ''}>${icon('lock-keyhole')}</button></td><td class="player-cell"><div class="player-wrap"><span class="player-avatar">${esc(p.name.split(' ').map(w => w[0]).slice(0,2).join(''))}</span><div><div class="player-name">${esc(p.name)} ${p.newPlayer ? '<span class="new-badge" title="Platform historical average is zero; may be a rookie or missing history">NEW</span>' : ''}${shortStatus ? `<span class="status-badge">${esc(shortStatus)}</span>` : ''}</div><div class="player-meta"><b>${esc(p.team)}</b> vs ${esc(p.opponent)} · ${time(p.tipoff)}</div></div></div></td><td><span class="pos-tag">${esc(p.position)}</span></td><td class="salary-cell">${money(p.salary)}</td><td>${minutesCell}</td><td class="projection-cell" title="${esc('SportsLine: ' + number(p.sources.sportsline) + ' · Fuel: ' + number(p.sources.fuel) + ' · Betting: ' + number(p.bettingProjection) + ' · ' + bettingDetail)}">${number(p.projection)}${comparison}</td><td class="value-cell ${valueForPlayer(p) >= (rules().id === 'draftkings' ? 5 : 1.3) ? 'good' : ''}">${Number.isFinite(p.projection) ? valueForPlayer(p).toFixed(2) + '×' : '—'}</td><td><button class="row-action ${excluded ? 'excluded' : ''}" data-exclude="${esc(p.id)}" aria-label="${excluded ? 'Include' : 'Exclude'} ${esc(p.name)}" aria-pressed="${excluded}">${icon('ban')}</button></td></tr>`;
+    return `<tr class="player-row ${locked ? 'locked' : ''} ${excluded ? 'excluded' : ''}" data-player-id="${esc(p.id)}" title="${esc(problem || `${p.starterStatus} starter · ${p.injury}`)}"><td><button class="row-action ${locked ? 'locked' : ''}" data-lock="${esc(p.id)}" aria-label="${locked ? 'Unlock' : 'Lock'} ${esc(p.name)}" aria-pressed="${locked}" ${problem && !locked ? 'disabled' : ''}>${icon('lock-keyhole')}</button></td><td class="player-cell"><div class="player-wrap"><span class="player-avatar">${esc(p.name.split(' ').map(w => w[0]).slice(0,2).join(''))}</span><div><div class="player-name">${esc(p.name)} ${p.newPlayer ? '<span class="new-badge" title="Platform historical average is zero; may be a rookie or missing history">NEW</span>' : ''}${shortStatus ? `<span class="status-badge">${esc(shortStatus)}</span>` : ''}</div><div class="player-meta"><b>${esc(p.team)}</b> vs ${esc(p.opponent)} · ${time(p.tipoff)}</div></div></div></td><td><span class="pos-tag">${esc(p.position)}</span></td><td class="salary-cell">${money(p.salary)}</td><td>${minutesCell}</td><td class="projection-cell" title="${esc('SportsLine: ' + number(p.sources.sportsline) + ' · Fuel: ' + number(p.sources.fuel) + ' · Betting: ' + number(p.bettingProjection) + ' · ' + bettingDetail)}">${number(p.projection)}${comparison}${hybridButton}</td><td class="value-cell ${valueForPlayer(p) >= (rules().id === 'draftkings' ? 5 : 1.3) ? 'good' : ''}">${Number.isFinite(p.projection) ? valueForPlayer(p).toFixed(2) + '×' : '—'}</td><td><button class="row-action ${excluded ? 'excluded' : ''}" data-exclude="${esc(p.id)}" aria-label="${excluded ? 'Include' : 'Exclude'} ${esc(p.name)}" aria-pressed="${excluded}">${icon('ban')}</button></td></tr>`;
   }).join('') : '<tr><td colspan="8" class="table-empty">No players match these filters. Try another position or turn off “Eligible only.”</td></tr>';
   document.querySelectorAll('[data-sort]').forEach(button => { button.textContent = `${{salary:'SALARY',minutes:'MIN',projection:'PROJ',value:'VALUE'}[button.dataset.sort]}${state.sort === button.dataset.sort ? state.direction < 0 ? ' ↓' : ' ↑' : ''}`; });
+  document.querySelectorAll('[data-hybrid]').forEach(button=>{button.onclick=()=>{
+    const p=state.slate.players.find(p=>p.id===button.dataset.hybrid);
+    showModal(`${p.name} · Stat sources`, `<p>${esc(hybridExplanation(p))}</p><p>SportsLine baseline: ${number(p.sources.sportsline)} FPTS. After betting replacements: ${number(p.hybridDetails.points)}. Fuel: ${number(p.sources.fuel)}. Displayed forecast: ${number(p.projection)}.</p><p>DraftKings keeps 3PM + DD/TD together because SportsLine does not expose them separately. That group changes only when a bookmaker provides all three. No missing market is treated as zero.</p>`);
+  };});
   document.querySelector('[data-sort="value"]').title=rules().id==='draftkings'?'Projected fantasy points per $1,000 salary':'Projected fantasy points per $1 salary';
   drawIcons();
 }
@@ -199,7 +209,7 @@ function renderLineup() {
   $('budget-fill').style.width = `${(result?.salary || 0) / platform.salaryCap * 100}%`;
   $('lineup-rows').innerHTML = platform.slots.map(slot => {
     const p = result?.lineup.find(p => p.slot === slot);
-    return `<div class="lineup-row" data-slot="${slot}"><span class="slot-pill">${slot}</span>${p ? `<div class="lineup-player"><strong>${esc(p.name)}</strong><small>${esc(p.team)} · ${esc(p.position)} · ${money(p.salary)}</small></div><div class="lineup-points"><strong>${number(p.projection)}</strong><small>${['combined','market'].includes(state.projectionMethod) ? esc(playerSourceLabel(p)) : 'FPTS'}</small></div>` : '<span class="empty-slot">Open position</span><span class="empty-dash">—</span>'}</div>`;
+    return `<div class="lineup-row" data-slot="${slot}"><span class="slot-pill">${slot}</span>${p ? `<div class="lineup-player"><strong>${esc(p.name)}</strong><small>${esc(p.team)} · ${esc(p.position)} · ${money(p.salary)}</small></div><div class="lineup-points"><strong>${number(p.projection)}</strong><small>${['combined','market','hybrid'].includes(state.projectionMethod) ? esc(playerSourceLabel(p)) : 'FPTS'}</small></div>` : '<span class="empty-slot">Open position</span><span class="empty-dash">—</span>'}</div>`;
   }).join('');
   $('build-rules').innerHTML = `${icon('shield-check')}<span>${state.settings.startersOnly ? 'Starters' : 'Include bench'} · ${state.settings.minMinutes}+ min · Max ${state.settings.maxNewPlayers} new</span>`;
   ['copy-lineup','download-lineup','save-lineup'].forEach(id => { $(id).disabled = !result; });
@@ -255,6 +265,7 @@ function method() {
     <p>SportsLine and Fuel are projection providers. 3-source blend adds an optional direct player-prop feed from The Odds API. Missing forecasts can reflect provider coverage, publication timing, or a failed player/matchup match; they do not establish that a player will receive few minutes.</p>
     <p>3-source blend averages whichever of SportsLine, Fuel, and Betting have a valid forecast: three sources get one-third each, two get half each, and one is used alone. If none are available, the player has no forecast. Betting estimates are experimental: published stat lines are used directly as approximations, then scored for the selected platform. DD/TD probabilities use margin-adjusted Yes/No odds when both are available, or implied probabilities from Yes-only odds with the bookmaker margin still included. Complete stats from at least one bookmaker are required; DraftKings also requires double-double and triple-double probabilities. Missing or unusable markets stay unavailable, never zero. We use the median across qualifying books as one betting source. Quotes expire after two hours. 3-source blend can use fresh model minutes when needed, but does not use model points.</p>
     <p>A higher forecast does not establish better accuracy. Model inputs expire after two hours; roster, injury or starter changes invalidate that matchup’s predictions. A new private export is required to refresh them. The public refresh workflow does not run or retrain either private model.</p>
+    <p>Betting hybrid is a separate option. It replaces available SportsLine stat contributions with betting estimates, and retains SportsLine for missing categories. The result replaces SportsLine in its blend with Fuel; SportsLine is not counted again as a third source. Each category uses the median of its valid bookmaker estimates. DraftKings 3PM + DD/TD remain one group: all three markets must be available at a bookmaker to replace the provider group. If matching provider components or fresh betting components are unavailable, the original provider totals are used. Individual quote timestamps are preserved and expire after two hours. Stat sources shows which contributions were used. Hybrid does not use model points; model minutes may be used when needed.</p>
     <h3>Who can enter a lineup?</h3><p>Players must meet your minutes and starter filters and have no unresolved injury flag. Official team injury reports must be submitted. ${poolRule}</p>
     <p>Two-game slates default to including healthy bench players with 16+ projected minutes, so cheaper rotation players can fit the budget. Larger slates default to starters with 24+ minutes. Your custom settings are kept when switching slates.</p>
     <p>“NEW” means the selected platform’s historical average is zero, including rookies or missing history. At most two are selected by default. Eight players and a ${money(platform.salaryCap)} cap are enforced.</p>
@@ -275,7 +286,7 @@ function openSettings() {
 function lineupText(result, slate) {
   const platform=platformRules(slate);
   const totals = comparisonTotals(result.lineup);
-  return `Slate Lab · ${platform.name} NBA · ${slate.date}\nMethod: ${result.modelName || slate.model?.name || 'Daily projections'}\n${result.lineup.map(p => `${p.slot}: ${p.name} (${p.team}) ${money(p.salary)}${['combined','market'].includes(result.projectionMethod) ? ` · ${playerSourceLabel(p)}${p.minutesSource === 'model' ? ' · Model minutes' : ''}` : ''}`).join('\n')}\nSalary: ${money(result.salary)}/${money(platform.salaryCap)} · Projection: ${result.projection.toFixed(2)}\nSame lineup: 50/50 ${number(totals.consensus)} · Trained ${number(totals.trained)}\nReview starters and injury news before entering.`;
+  return `Slate Lab · ${platform.name} NBA · ${slate.date}\nMethod: ${result.modelName || slate.model?.name || 'Daily projections'}\n${result.lineup.map(p => `${p.slot}: ${p.name} (${p.team}) ${money(p.salary)}${['combined','market','hybrid'].includes(result.projectionMethod) ? ` · ${playerSourceLabel(p)}${p.minutesSource === 'model' ? ' · Model minutes' : ''}` : ''}`).join('\n')}\nSalary: ${money(result.salary)}/${money(platform.salaryCap)} · Projection: ${result.projection.toFixed(2)}\nSame lineup: 50/50 ${number(totals.consensus)} · Trained ${number(totals.trained)}\nReview starters and injury news before entering.`;
 }
 async function copyResult(result = state.result, slate = state.slate) {
   if (!result) return;
@@ -286,7 +297,7 @@ async function copyResult(result = state.result, slate = state.slate) {
 function downloadResult() {
   if (!state.result) return;
   const cell = value => `"${String(value).replace(/"/g,'""')}"`;
-  const rows = [['Slot','Player',`${rules().name} ID`,'Team','Position','Salary','Projection','Slate date','Snapshot time','Method','50/50 points','Trained points','Model inputs time','Projection source','Minutes','Minutes source'], ...state.result.lineup.map(p => [p.slot,p.name,p.id,p.team,p.position,p.salary,p.projection,state.slate.date,state.slate.updatedAt,state.result.modelName,p.consensusProjection ?? '',p.modelProjection ?? '',state.result.modelInputsAt ?? '',playerSourceLabel(p),p.minutes ?? '',p.minutesSource ?? 'sportsline'])];
+  const rows = [['Slot','Player',`${rules().name} ID`,'Team','Position','Salary','Projection','Slate date','Snapshot time','Method','50/50 points','Trained points','Model inputs time','Projection source','Minutes','Minutes source','Hybrid stat sources'], ...state.result.lineup.map(p => [p.slot,p.name,p.id,p.team,p.position,p.salary,p.projection,state.slate.date,state.slate.updatedAt,state.result.modelName,p.consensusProjection ?? '',p.modelProjection ?? '',state.result.modelInputsAt ?? '',playerSourceLabel(p),p.minutes ?? '',p.minutesSource ?? 'sportsline',p.projectionMethod==='hybrid'?hybridExplanation(p):''])];
   const url = URL.createObjectURL(new Blob([rows.map(row => row.map(cell).join(',')).join('\r\n')], { type:'text/csv;charset=utf-8' }));
   const link = document.createElement('a'); link.href = url; link.download = `slatelab-${rules().id}-${state.slate.date}-${state.slate.id}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast(`Review CSV downloaded — enter these players on ${rules().name}`);

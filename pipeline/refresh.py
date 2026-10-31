@@ -22,9 +22,9 @@ import requests
 from bs4 import BeautifulSoup
 import pdfplumber
 try:
-    from .betting import BettingFeed
+    from .betting import BettingFeed, WEIGHTS
 except ImportError:  # python pipeline/refresh.py
-    from betting import BettingFeed
+    from betting import BettingFeed, WEIGHTS
 
 ROOT = Path(__file__).resolve().parents[1]
 EASTERN = ZoneInfo('America/New_York')
@@ -34,6 +34,7 @@ TEAM_NAMES = dict(zip(
     ['ATL','BOS','BKN','CHA','CHI','CLE','DAL','DEN','DET','GSW','HOU','IND','LAC','LAC','LAL','MEM','MIA','MIL','MIN','NOP','NYK','OKC','ORL','PHI','PHX','POR','SAC','SAS','TOR','UTA','WAS']))
 POSITIONS = {'PG','SG','SF','PF','C'}
 STAT_WEIGHTS = {'PTS': 1, 'TRB': 1.2, 'AST': 1.5, 'ST': 3, 'BK': 3, 'TO': -1}
+STAT_NAMES = {'PTS': 'points', 'TRB': 'rebounds', 'AST': 'assists', 'ST': 'steals', 'BK': 'blocks', 'TO': 'turnovers'}
 
 def team(value):
     return {'GS':'GSW','NO':'NOP','PHO':'PHX','NY':'NYK','SA':'SAS'}.get(value, value)
@@ -121,6 +122,7 @@ def parse_sportsline(html):
         if identity in result:
             raise ValueError('Duplicate SportsLine player identity.')
         result[identity] = {'points':sum(stats[k]*w for k,w in STAT_WEIGHTS.items()),'minutes':minutes,
+                            'stats': {STAT_NAMES[k]: v for k, v in stats.items()},
                             'matchup':'@'.join(team(t) for t in p['GAME'].split('@'))}
         # The provider's native DK mean includes its simulated bonus outcomes.
         # Never substitute FP/FD or threshold bonuses from mean component stats.
@@ -132,6 +134,33 @@ def parse_sportsline(html):
     if len(result) < 8:
         raise ValueError('SportsLine has too few complete forecasts.')
     return result
+
+def sportsline_components(provider, platform, game, tipoff, now):
+    """Reconcile weighted provider components to its native platform total.
+
+    SportsLine does not expose separate 3PM or bonus means. On DK, keep their
+    combined contribution intact; never invent individual probabilities.
+    """
+    if not provider or not isinstance(provider.get('stats'), dict):
+        return None
+    stats = provider['stats']
+    required = set(STAT_NAMES.values())
+    if not all(isinstance(stats.get(k), (int, float)) and not isinstance(stats[k], bool)
+               and math.isfinite(stats[k]) and stats[k] >= 0 for k in required):
+        return None
+    total = provider.get('draftkings_points' if platform == 'draftkings' else 'points')
+    if not isinstance(total, (int, float)) or isinstance(total, bool) or not math.isfinite(total) or total < 0:
+        return None
+    values = {k: round(stats[k] * WEIGHTS[platform][k], 6) for k in sorted(required)}
+    if platform == 'draftkings':
+        extra = round(total - sum(values.values()), 6)
+        if extra < 0:  # Rounded provider totals may not permit a valid decomposition.
+            return None
+        values['dk_extras'] = extra
+    elif abs(sum(values.values()) - total) > .002:
+        return None
+    return {'method': 'provider-components-v1', 'platform': platform, 'game': game,
+            'tipoff': tipoff, 'updatedAt': iso(now), 'total': round(total, 3), 'values': values}
 
 def parse_fuel(html, date, platform=None):
     soup = BeautifulSoup(html,'html.parser')
@@ -311,6 +340,7 @@ def make_slate(contest, csv_text, sports, fuel, starters, injuries, coverage, da
                         'salary':salary,'projection':round(points,3) if points is not None else None,
                         'minutes':a['minutes'] if a else None,'sourceCount':int(bool(a))+int(bool(b)),
                         'sources':{'sportsline':round(a['points'],3) if a else None,'fuel':b['points'] if b else None},
+                        'sportslineComponents':sportsline_components(a,'yahoo',matchup,by_matchup[matchup]['tipoff'],now),
                         'starter':identity in starters,'starterStatus':starters.get(identity,'reserve'),
                         'injury':status,'providerClear':bool(b) and b['badge'] not in {'O','OUT','Q','D','GTD','DTD'},
                         'providerFlagsClear':yahoo_status in {'','NONE','P','PROBABLE','ACTIVE'} and (not b or b['badge'] in {'','P','PROBABLE'}),
@@ -383,6 +413,7 @@ def make_draftkings_slate(group,csv_text,sports,fuel,starters,injuries,coverage,
                         'tipoff':by_matchup[matchup]['tipoff'],'salary':salary,'projection':b['points'] if b else None,
                         'consensusProjection':round(consensus,3) if consensus is not None else None,
                         'minutes':a['minutes'] if a else None,'sourceCount':int(bool(b))+int(dk_points is not None),'sources':{'sportsline':dk_points,'fuel':b['points'] if b else None},
+                        'sportslineComponents':sportsline_components(a,'draftkings',matchup,by_matchup[matchup]['tipoff'],now),
                         'starter':identity in starters,'starterStatus':starters.get(identity,'reserve'),'injury':status,
                         'providerClear':bool(b) and b['badge'] not in {'O','OUT','Q','D','GTD','DTD','IR','DL'} and flag in {'','NONE','P','PROBABLE','ACTIVE'},
                         'providerFlagsClear':flag in {'','NONE','P','PROBABLE','ACTIVE'} and (not b or b['badge'] in {'','P','PROBABLE'}),

@@ -17,6 +17,8 @@ A personal Yahoo and DraftKings NBA lineup workbench. Select **Yahoo** or **Draf
 
 **Optional 3-source blend:** equal-average the available SportsLine, Fuel, and betting-derived estimates (three, two, or one source). Live betting needs an `ODDS_API_KEY` Actions secret. [Setup, quota controls, and experimental conversion assumptions](docs/betting-blend.md).
 
+**Optional Betting hybrid:** use betting for available stat categories and retain SportsLine estimates for missing categories. The adjusted forecast replaces SportsLine in its average with Fuel, so fallback estimates are not counted twice. DraftKings threes and DD/TD remain one group unless betting covers all three. **Stat sources** and CSV exports show the contributions. The next manual odds run supplies partial betting components; older snapshots fall back to provider totals. [Hybrid details](docs/betting-blend.md#betting-hybrid-experimental).
+
 **Separate manual odds refresh:** run [Refresh betting odds (manual)](https://github.com/jimrong79/yahoo-dfs-slate-lab/actions/workflows/odds.yml) on `main` when you want betting data (for example, 3 p.m. Pacific). It permits one owner-requested attempt per Pacific day and reports credit use. Existing scheduled, push, and manual **Refresh NBA slates and publish** runs continue updating SportsLine/Fuel with **zero Odds API requests**. Betting quotes expire after two hours; normal refreshes never make old quotes look fresh.
 
 ## V1 method
