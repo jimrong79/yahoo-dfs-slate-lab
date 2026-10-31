@@ -83,7 +83,7 @@ test('legal Yahoo and DK lineups retain filters, reevaluate expired components, 
       p.bettingComponents={method:'prop-components-v1',platform,game:p.game,tipoff:p.tipoff,values:{points:{points:total+2,updatedAt:new Date(time-119*60000).toISOString()}}};
     }
     const without=structuredClone(base);without.players.forEach(p=>{delete p.bettingComponents;delete p.sportslineComponents;});
-    for(const method of ['consensus','combined','market','trained','provider'])assert.deepEqual(selectProjection(base,null,method,time).players.map(p=>p.projection),selectProjection(without,null,method,time).players.map(p=>p.projection));
+    for(const method of ['consensus','combined','trained','provider'])assert.deepEqual(selectProjection(base,null,method,time).players.map(p=>p.projection),selectProjection(without,null,method,time).players.map(p=>p.projection));
     const selected=selectProjection(base,null,'hybrid',time),result=generateLineup(selected,{},time);
     assert.equal(result.lineup.length,8);assert.ok(result.salary<=base.salaryCap);
     assert.ok(result.lineup.every(p=>p.hybridSources.includes('hybrid')));

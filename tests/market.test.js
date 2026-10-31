@@ -5,6 +5,7 @@ import {selectProjection,lineupBettingProblem,playerSourceLabel} from '../src/pr
 import {generateLineup,playerProblem,slateProblem} from '../src/optimizer.js';
 import {modelFixture} from './model-fixture.js';
 import {draftKingsFixture} from './draftkings-fixture.js';
+import {hybridExplanation} from '../src/hybrid.js';
 const yahoo=JSON.parse(readFileSync('public/data/2026-10-21-26039.json','utf8'));
 function addBetting(base){
   base=structuredClone(base);
@@ -87,4 +88,82 @@ test('quote expiry invalidates an old lineup and is reevaluated at generation ti
   assert.match(lineupBettingProblem(selected,result.lineup,later),/expired/);
   const rebuilt=generateLineup(selected,{},later);
   assert.ok(rebuilt.lineup.every(p=>!p.blendSources.includes('betting')));
+});
+
+function addPartialBetting(fixture) {
+  const base=structuredClone(fixture),platform=base.platform||'yahoo';
+  for(const p of base.players){
+    p.sources={sportsline:40,fuel:50,betting:null};delete p.betting;
+    p.sportslineComponents={method:'provider-components-v1',platform,game:p.game,tipoff:p.tipoff,updatedAt:base.updatedAt,total:40,
+      values:{points:20,rebounds:6,assists:12,steals:3,blocks:3,turnovers:-4,...(platform==='draftkings'?{dk_extras:0}:{})}};
+    p.bettingComponents={method:'prop-components-v1',platform,game:p.game,tipoff:p.tipoff,values:{points:{points:28,updatedAt:base.updatedAt}}};
+  }
+  return base;
+}
+test('provider-filled betting is a third equal input, preserving Combined, 50/50, and the separate hybrid recipe',()=>{
+  for(const fixture of [yahoo,draftKingsFixture()]){
+    const base=addPartialBetting(fixture),now=Date.parse(base.updatedAt)+30000;
+    const p=selectProjection(base,null,'market',now).players[0];
+    assert.equal(p.marketBettingProjection,48);assert.equal(p.bettingProjection,null);
+    assert.equal(p.projection,46);assert.deepEqual(p.blendSources,['sportsline','fuel','betting_filled']);
+    assert.equal(playerSourceLabel(p),'SportsLine + Fuel + Betting (provider-filled)');
+    assert.match(hybridExplanation(p),/original SportsLine and Fuel/);
+    assert.match(hybridExplanation(p),/not three independent/);
+    assert.match(hybridExplanation(p),/SportsLine retained: REB, AST, STL, BLK, TO/);
+    assert.equal(selectProjection(base,null,'hybrid',now).players[0].projection,49);
+    const without=structuredClone(base);without.players.forEach(p=>delete p.bettingComponents);
+    for(const method of ['combined','consensus','provider','trained'])assert.deepEqual(
+      selectProjection(base,null,method,now).players.map(p=>p.projection),selectProjection(without,null,method,now).players.map(p=>p.projection));
+  }
+});
+test('complete betting takes precedence over filled estimates, including a real zero',()=>{
+  for(const points of [0,30]){
+    const base=addBetting(addPartialBetting(yahoo)),now=Date.parse(base.updatedAt)+30000;
+    base.players[0].sources.betting=base.players[0].betting.points=points;
+    const p=selectProjection(base,null,'market',now).players[0];
+    assert.equal(p.marketBettingProjection,points);assert.equal(p.marketBettingSource,'betting');
+    assert.equal(p.projection,(40+50+points)/3);
+    assert.deepEqual(p.blendSources,['sportsline','fuel','betting']);
+  }
+});
+test('filled estimates require actual betting and matching provider data; missing categories never become zero',()=>{
+  const base=addPartialBetting(yahoo),now=Date.parse(base.updatedAt)+30000,p=base.players[0];
+  p.sources.fuel=null;
+  assert.equal(selectProjection(base,null,'market',now).players[0].projection,44);
+  p.sources.fuel=50;
+  for(const invalid of [null,undefined,false,'0',NaN]){
+    p.bettingComponents.values.points.points=invalid;
+    const selected=selectProjection(base,null,'market',now).players[0];
+    assert.equal(selected.projection,45);assert.equal(selected.marketBettingProjection,null);
+    assert.deepEqual(selected.blendSources,['sportsline','fuel']);
+  }
+  p.bettingComponents.values.points.points=0;
+  assert.equal(selectProjection(base,null,'market',now).players[0].marketBettingProjection,20);
+  p.bettingComponents.values={points:{points:0,updatedAt:base.updatedAt},turnovers:{points:-24,updatedAt:base.updatedAt}};
+  assert.equal(selectProjection(base,null,'market',now).players[0].marketBettingProjection,0);
+  assert.equal(selectProjection(base,null,'market',now).players[0].projection,30);
+  p.sources.sportsline=null;
+  const selected=selectProjection(base,null,'market',now).players[0];
+  assert.equal(selected.projection,50);assert.deepEqual(selected.blendSources,['fuel']);
+});
+test('filled betting generates legal lineups and expires by individual contribution at rebuild time',()=>{
+  for(const fixture of [yahoo,draftKingsFixture()]){
+    const base=addPartialBetting(fixture),now=Date.parse(base.updatedAt)+30000,later=now+2*60000;
+    base.players.forEach(p=>{
+      p.bettingComponents.values.points.updatedAt=new Date(now-119*60000).toISOString();
+      p.bettingComponents.values.rebounds={points:9,updatedAt:base.updatedAt};
+    });
+    const selected=selectProjection(base,null,'market',now),result=generateLineup(selected,{},now);
+    assert.equal(result.lineup.length,8);assert.ok(result.salary<=base.salaryCap);
+    assert.ok(new Set(result.lineup.map(p=>p.game)).size>=2);
+    assert.ok(result.lineup.every(p=>p.marketBettingProjection===51));
+    assert.equal(lineupBettingProblem(selected,result.lineup,now),null);
+    assert.match(lineupBettingProblem(selected,result.lineup,later),/expired/);
+    const rebuilt=generateLineup(selected,{},later);
+    assert.ok(rebuilt.lineup.every(p=>p.marketBettingProjection===43));
+    assert.ok(rebuilt.lineup.every(p=>p.blendSources.includes('betting_filled')));
+    base.players.forEach(p=>{p.bettingComponents.values={};});
+    const fallback=generateLineup(selectProjection(base,null,'market',later),{},later);
+    assert.ok(fallback.lineup.every(p=>p.projection===45 && p.blendSources.length===2));
+  }
 });
