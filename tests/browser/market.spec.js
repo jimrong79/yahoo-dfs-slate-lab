@@ -40,7 +40,7 @@ for(const platform of ['yahoo','draftkings'])test(`${platform} whole-feed outage
   let active=failed;
   await page.route(`**/data/${healthy.date}-${healthy.id}.json*`,route=>route.fulfill({json:active}));
   await page.goto(`./?platform=${platform}`);
-  for(const method of ['combined','market','consensus','trained']){
+  for(const method of ['combined','market','hybrid','consensus','trained']){
     await page.locator('#projection-select').selectOption(method);
     await expect(page.locator('#generate')).toBeDisabled();
     await expect(page.locator('#notice')).toContainText('Fantasy Fuel feed unavailable');

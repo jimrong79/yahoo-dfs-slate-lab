@@ -54,6 +54,7 @@ jobs:
           npm test
           python -m pytest tests/test_pipeline.py -q
           python -m pytest tests/test_betting.py -q
+          python -m pytest tests/test_hybrid.py -q
           python -m pytest tests/test_odds_gate.py -q
           python -m pytest tests/test_results.py -q
       - name: Recover previous snapshots

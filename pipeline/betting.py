@@ -17,6 +17,7 @@ import requests
 URL = 'https://api.the-odds-api.com/v4/sports/basketball_nba'
 DOCS = 'https://the-odds-api.com/sports-odds-data/betting-markets.html'
 METHOD = 'prop-lines-v2'
+COMPONENT_METHOD = 'prop-components-v1'
 EVENT_TOLERANCE_SECONDS = 15 * 60
 EASTERN = ZoneInfo('America/New_York')
 WEIGHTS = {
@@ -88,7 +89,7 @@ def bonus_probability(outcomes):
     return 1 / yes, 'yes_only_implied'
 
 
-def book_estimates(book, platform, now, name_key, diagnostics=None):
+def book_estimates(book, platform, now, name_key, diagnostics=None, components=None):
     """Require a complete score from a single bookmaker; never fill missing stats."""
     stats = defaultdict(dict)
     timestamps = defaultdict(dict)
@@ -135,6 +136,16 @@ def book_estimates(book, platform, now, name_key, diagnostics=None):
                       'status': 'incomplete' if missing else 'complete'}
         if diagnostics is not None:
             diagnostics[name] = diagnostic
+        if components is not None:
+            parts = {k: {'points': round(values[k] * w, 6), 'updatedAt': timestamps[name][k]}
+                     for k, w in WEIGHTS[platform].items() if k != 'threes' and k in values}
+            extras = {'threes', 'double_double', 'triple_double'}
+            if platform == 'draftkings' and extras <= values.keys() and values['triple_double'] <= values['double_double']:
+                parts['dk_extras'] = {'points': round(.5 * values['threes'] + 1.5 * values['double_double'] + 3 * values['triple_double'], 6),
+                    'updatedAt': min((timestamps[name][k] for k in extras), key=stamp),
+                    'bonusProbabilityMethods': probability_methods[name]}
+            if parts:
+                components[name] = parts
         if missing:
             continue
         points = sum(values[k] * w for k, w in WEIGHTS[platform].items())
@@ -225,6 +236,7 @@ class BettingFeed:
             missing = ', '.join(f'{k}: {v}' for k, v in sorted(row['missingMarkets'].items())) or 'none'
             lines.append(f'- {row["platform"]} {row["game"]}: {row["completePlayers"]}/{row["players"]} complete player estimates; '
                          f'{row["noPlayerQuotes"]} players without matching quotes. Missing/unusable markets in closest bookmaker: {missing}.')
+            lines.append(f'  Hybrid components available for {row.get("componentPlayers", 0)} players (requires matching provider components).')
         lines.append('- Quotes keep their original timestamp and expire after two hours; a normal refresh does not renew them.')
         print(f'Odds requests: {self.odds_requests}; confirmed credits used: {self.credits_used}; unknown-cost requests: {self.unknown_cost_requests}', flush=True)
         print('\n'.join(lines), flush=True)
@@ -271,6 +283,7 @@ class BettingFeed:
             for player in slate['players']:
                 player.pop('betting', None)
                 player.pop('bettingStatus', None)
+                player.pop('bettingComponents', None)
                 player['sources']['betting'] = None
             self.error = 'Betting response could not be validated. Using available SportsLine / Fuel forecasts.'
             slate['sources']['betting'] = {'url': DOCS, 'capturedAt': self.now.isoformat(),
@@ -286,21 +299,25 @@ class BettingFeed:
         cached = {p['id']: p for p in (previous or {}).get('players', [])} if (
             previous and previous.get('date') == slate['date'] and previous.get('platform') == platform) else {}
         info = {'url': DOCS, 'capturedAt': self.now.isoformat().replace('+00:00', 'Z'),
-                'status': 'unavailable', 'method': METHOD, 'experimental': True}
+                'status': 'unavailable', 'method': METHOD, 'componentMethod': COMPONENT_METHOD, 'experimental': True}
         if previous and previous.get('date') == slate['date'] and previous.get('platform') == platform:
             old_info = previous.get('sources', {}).get('betting', {})
-            if old_info.get('method') == METHOD:
+            if old_info.get('method') == METHOD and old_info.get('componentMethod') == COMPONENT_METHOD:
                 info['eventCaptures'] = {k: v for k, v in old_info.get('eventCaptures', {}).items() if fresh(v, self.now, 60)}
             if previous.get('sources', {}).get('betting', {}).get('lastAttempt'):
                 info['lastAttempt'] = previous['sources']['betting']['lastAttempt']
         slate['sources']['betting'] = info
         for player in slate['players']:
+            player.pop('bettingComponents', None)
             player['sources']['betting'] = None
             old = cached.get(player['id'], {})
             estimate = old.get('betting')
             identity_matches = all(old.get(k) == player.get(k) for k in ('name', 'team', 'opponent', 'game', 'tipoff'))
             if identity_matches and old.get('bettingStatus', {}).get('method') == METHOD:
                 player['bettingStatus'] = old['bettingStatus']
+            partial = valid_components(old.get('bettingComponents'), player, platform, self.now) if identity_matches else None
+            if partial:
+                player['bettingComponents'] = partial
             if estimate and identity_matches and valid_estimate(estimate, player, platform, self.now):
                 player['betting'] = estimate
                 player['sources']['betting'] = estimate['points']
@@ -313,7 +330,7 @@ class BettingFeed:
                 # Reuse a successful event capture for one hour, even if no player
                 # had a complete stat set. Reuse never renews quote timestamps.
                 previous_capture = (previous or {}).get('sources', {}).get('betting', {}).get('eventCaptures', {}).get(game['matchup'])
-                if previous_capture and (previous or {}).get('sources', {}).get('betting', {}).get('method') == METHOD and fresh(previous_capture, self.now, 60):
+                if previous_capture and info.get('eventCaptures', {}).get(game['matchup']) == previous_capture:
                     info.setdefault('eventCaptures', {})[game['matchup']] = previous_capture
                     checks.append({'game': game['matchup'], 'tipoff': game['tipoff'], 'status': 'cached_capture'})
                     continue
@@ -339,27 +356,44 @@ class BettingFeed:
                 # including withdrawn/incomplete props. Failed fetches retain only fresh cache.
                 for player in pool:
                     player.pop('betting', None)
+                    player.pop('bettingComponents', None)
                     player['sources']['betting'] = None
                 by_name = defaultdict(list)
+                partials = defaultdict(lambda: defaultdict(list))
                 audits = defaultdict(list)
                 books = data.get('bookmakers', [])
                 book_keys = [b.get('key') for b in books]
                 for book in books:
                     if not isinstance(book.get('key'), str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', book['key']) or book_keys.count(book['key']) != 1:
                         continue
-                    diagnostics = {}
-                    for name, estimate in book_estimates(book, platform, self.now, self.name_key, diagnostics).items():
+                    diagnostics, components = {}, {}
+                    for name, estimate in book_estimates(book, platform, self.now, self.name_key, diagnostics, components).items():
                         by_name[name].append({**estimate, 'book': book['key']})
+                    for name, values in components.items():
+                        for kind, component in values.items():
+                            partials[name][kind].append({**component, 'book': book['key']})
                     for name, diagnostic in diagnostics.items():
                         audits[name].append({'book': book['key'], **diagnostic})
                 names = [self.name_key(p['name']) for p in pool]
                 coverage = {'platform': platform, 'game': game['matchup'], 'players': len(pool),
-                            'completePlayers': 0, 'noPlayerQuotes': 0, 'missingMarkets': {}}
+                            'completePlayers': 0, 'componentPlayers': 0, 'noPlayerQuotes': 0, 'missingMarkets': {}}
                 for player in pool:
                     name = self.name_key(player['name'])
                     estimates = by_name.get(name, [])
                     details = {'method': METHOD, 'checkedAt': info['capturedAt'], 'bookChecks': audits.get(name, [])}
                     player['bettingStatus'] = details
+                    if names.count(name) == 1 and partials[name]:
+                        values = {}
+                        for kind, quotes in partials[name].items():
+                            values[kind] = {'points': round(median(q['points'] for q in quotes), 6),
+                                'updatedAt': min((q['updatedAt'] for q in quotes), key=stamp),
+                                'bookmakers': sorted(q['book'] for q in quotes)}
+                            if kind == 'dk_extras':
+                                values[kind]['bonusProbabilityMethods'] = {k: sorted({q['bonusProbabilityMethods'][k] for q in quotes})
+                                    for k in ('double_double', 'triple_double')}
+                        player['bettingComponents'] = {'method': COMPONENT_METHOD, 'platform': platform,
+                            'game': player['game'], 'tipoff': player['tipoff'], 'values': values}
+                        coverage['componentPlayers'] += 1
                     if names.count(name) != 1 or not estimates:
                         best = min(audits[name], key=lambda a: len(a['missingMarkets'])) if audits[name] else None
                         missing = best['missingMarkets'] if best else sorted(set(WEIGHTS[platform]) | ({'double_double', 'triple_double'} if platform == 'draftkings' else set()))
@@ -401,7 +435,8 @@ class BettingFeed:
                                    'playerCount': count, 'message': result_message,
                                    'coverage': slate_coverage,
                                    'games': [dict(c) for c in checks]}
-        info.update(playerCount=count, status='available' if count else 'not_configured' if not self.configured else 'unavailable')
+        info.update(playerCount=count, componentPlayerCount=sum(bool(p.get('bettingComponents')) for p in slate['players']),
+                    status='available' if count else 'not_configured' if not self.configured else 'unavailable')
         info['message'] = (self.error or ('Betting estimates available; complete, fresh props only.' if count else
                            f'Last manual attempt {info["lastAttempt"]["at"]}: {info["lastAttempt"]["message"]} Cached quotes may have expired; normal refreshes do not fetch new odds.' if info.get('lastAttempt') and not self.allow_fetch else
                            'Betting feed not configured. Using available SportsLine / Fuel forecasts.' if not self.configured else
@@ -417,3 +452,18 @@ def valid_estimate(value, player, platform, now):
     return (isinstance(value, dict) and value.get('complete') is True and value.get('method') == METHOD and value.get('platform') == platform and
             value.get('game') == player['game'] and value.get('tipoff') == player['tipoff'] and
             number(value.get('points')) and value['points'] >= 0 and fresh(value.get('updatedAt'), now))
+
+
+def valid_components(value, player, platform, now):
+    """Only reuse fresh derived components, keeping each original timestamp."""
+    if not (isinstance(value, dict) and value.get('method') == COMPONENT_METHOD and value.get('platform') == platform
+            and value.get('game') == player['game'] and value.get('tipoff') == player['tipoff']
+            and isinstance(value.get('values'), dict)):
+        return None
+    allowed = {k: w for k, w in WEIGHTS[platform].items() if k != 'threes'}
+    if platform == 'draftkings':
+        allowed['dk_extras'] = 1
+    values = {k: v for k, v in value['values'].items() if k in allowed and isinstance(v, dict)
+              and number(v.get('points')) and 0 <= v['points'] / allowed[k] <= 100
+              and fresh(v.get('updatedAt'), now)}
+    return {**value, 'values': values} if values else None

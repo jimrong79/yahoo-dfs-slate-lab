@@ -24,6 +24,8 @@ export function playerProblem(p, settings = {}, platform = 'yahoo') {
   const rules = platformRules(platform);
   if (p.projectionMethod === 'trained') {
     if (!p.modelAvailable || !Number.isFinite(p.projection) || p.projection <= 0) return 'Awaiting a matching trained-model prediction';
+  } else if (p.projectionMethod === 'hybrid') {
+    if (!Number.isFinite(p.projection) || p.projection <= 0 || p.projectionSource !== 'hybrid' || !p.hybridSources?.length) return 'Awaiting a provider forecast or matching hybrid components';
   } else if (p.projectionMethod === 'market') {
     if (!Number.isFinite(p.projection) || p.projection <= 0 || p.projectionSource !== 'market' || !p.blendSources?.length) return 'Awaiting a SportsLine, Fuel, or complete betting forecast';
   } else if (p.projectionMethod === 'combined') {
@@ -32,7 +34,7 @@ export function playerProblem(p, settings = {}, platform = 'yahoo') {
   } else if (!Number.isFinite(p.projection) || p.projection <= 0 || p.sourceCount < (p.projectionMethod === 'consensus' ? 2 : rules.projectionSources)) return rules.id === 'yahoo' || p.projectionMethod === 'consensus' ? 'Awaiting both projection sources' : 'Awaiting a DraftKings projection';
   if (['Out', 'Doubtful', 'Questionable', 'Unknown'].includes(p.injury)) return p.injury === 'Unknown' ? 'Team injury report not submitted' : p.injury;
   if (!['Not listed', 'Available', 'Probable'].includes(p.injury)) return 'Unknown injury status';
-  const providerClear = ['combined','market'].includes(p.projectionMethod) || (rules.id === 'draftkings' && p.projectionMethod === 'trained') ? p.providerFlagsClear ?? p.providerClear : p.providerClear;
+  const providerClear = ['combined','market','hybrid'].includes(p.projectionMethod) || (rules.id === 'draftkings' && p.projectionMethod === 'trained') ? p.providerFlagsClear ?? p.providerClear : p.providerClear;
   if (!providerClear) return 'Unresolved provider injury flag';
   if (settings.startersOnly !== false && !p.starter) return 'Outside projected starting five';
   if (!Number.isFinite(p.minutes)) return 'Awaiting projected minutes';

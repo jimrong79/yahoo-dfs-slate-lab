@@ -4,6 +4,18 @@ Select **3-source blend (experimental)** on either Yahoo or DraftKings. Each pla
 
 The table, lineup, copied text, and CSV identify contributing sources. Minutes still come from SportsLine or a compatible, fresh private-model export. Injury, starter, minutes, salary, roster, and authentication checks still apply.
 
+## Betting hybrid (experimental)
+
+This separate mode uses incomplete betting coverage without treating missing markets as zero. Start with the current SportsLine native platform forecast and replace each available stat's fantasy-point contribution with its betting-derived contribution. Missing, malformed, mismatched, or expired categories retain their SportsLine contribution. Genuine numeric zeros remain valid. Each category uses the median across its qualifying bookmakers, with the oldest contributing quote timestamp.
+
+The final forecast is `(adjusted SportsLine + Fuel) / 2` when both are available; otherwise use the available forecast alone. **Do not also average in the unadjusted SportsLine forecast.** This is a hybrid with shared provider inputs, not three independent forecasts. If a valid SportsLine component breakdown or fresh betting components are unavailable, use the original SportsLine/Fuel totals. If neither provider is available, the player has no hybrid forecast. This mode does not use model points.
+
+SportsLine publishes PTS, REB, AST, STL, BLK, and TO components. For DraftKings, the difference between its native DK total and those six weighted contributions is retained as one **3PM + DD/TD** contribution. Replace that group only when all three betting markets exist at the same bookmaker and the DD/TD probabilities pass validation. Never infer individual provider bonus probabilities or subtract a bonus twice. A negative or inconsistent provider remainder prevents a hybrid adjustment; it is not clamped to zero. Provider totals remain usable through the ordinary fallback.
+
+**Stat sources** shows the betting categories and retained provider categories on desktop and mobile; CSV exports preserve that explanation. Quote expiry is checked again by the authenticated server when building. Expiring one category returns that category to the provider and invalidates any displayed lineup that used it. Normal refreshes preserve each quote's original age. A successful new event response removes withdrawn components, while failed requests retain only still-fresh cached components.
+
+Published `sportslineComponents` and `bettingComponents` contain derived fantasy-point contributions and provenance, not decimal odds or raw outcome arrays. Old snapshots do not contain partial component values and cannot be reconstructed from their missing-market diagnostics. The next owner-triggered manual odds run populates them. No new API markets, triggers, or extra requests were added for this feature. Original 50/50, Combined, and strict 3-source blend retain their formulas.
+
 ## Activate the feed
 
 No working complete no-key feed was confirmed. The adapter targets [The Odds API v4](https://the-odds-api.com/liveapi/guides/v4/) and its [NBA player-prop markets](https://the-odds-api.com/sports-odds-data/betting-markets.html). A credential is required. Production coverage cannot be confirmed until a real key is configured.
