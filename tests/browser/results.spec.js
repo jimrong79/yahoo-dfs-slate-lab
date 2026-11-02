@@ -13,20 +13,21 @@ test('public results work without sign-in, with period/platform filters and an a
   let authRequests=0;page.on('request',r=>{if(r.url().includes('/api/session'))authRequests++;});
   await page.route('**/data/results.json*',route=>route.fulfill({json:report}));
   await page.goto('./results.html');
-  await expect(page.locator('#result-profit')).toHaveText('+$9.00');
-  await expect(page.locator('#result-fees')).toHaveText('$16.00');
-  await expect(page.locator('#result-cash-rate')).toHaveText('40.0%');
+  await expect(page.locator('#results-period')).toHaveValue('season');
+  await expect(page.locator('#result-profit')).toHaveText('+$7.00');
+  await expect(page.locator('#result-fees')).toHaveText('$18.00');
+  await expect(page.locator('#result-cash-rate')).toHaveText('33.3%');
   await expect(page.locator('#results-coverage')).toContainText('DraftKings records through Oct 26');
-  await expect(page.locator('#profit-chart .chart-dot')).toHaveCount(3);
+  await expect(page.locator('#profit-chart .chart-dot')).toHaveCount(4);
   await page.locator('#profit-chart .chart-dot').first().focus();
-  await expect(page.locator('#chart-detail')).toContainText('Oct 21');
+  await expect(page.locator('#chart-detail')).toContainText('Oct 20');
   await page.locator('#results-platform').selectOption('draftkings');
   await expect(page.locator('#result-profit')).toHaveText('+$5.00');
   await expect(page.locator('#result-cash-rate')).toHaveText('50.0%');
   await expect(page.locator('#profit-chart .chart-dot')).toHaveCount(1);
   await page.locator('#results-platform').selectOption('all');
-  await page.locator('#results-period').selectOption('season');
-  await expect(page.locator('#result-profit')).toHaveText('+$7.00');
+  await page.locator('#results-period').selectOption('last7');
+  await expect(page.locator('#result-profit')).toHaveText('+$9.00');
   await page.locator('[data-week="2026-10-19"]').click();
   await expect(page.locator('#result-profit')).toHaveText('+$4.00');
   await page.locator('#results-platform').selectOption('draftkings');
@@ -53,7 +54,7 @@ test('failed or malformed reports show an error and retry without stale figures'
   await page.locator('#results-retry').click();
   await expect(page.locator('#results-state')).toContainText('invalid totals');
   await page.locator('#results-retry').click();
-  await expect(page.locator('#result-profit')).toHaveText('+$9.00');
+  await expect(page.locator('#result-profit')).toHaveText('+$7.00');
 });
 
 test('weekly results are reachable from the builder on desktop and mobile',async({page})=>{
@@ -62,7 +63,7 @@ test('weekly results are reachable from the builder on desktop and mobile',async
   await page.goto('./');
   await page.locator('.refresh-actions a[href="./results.html"]').click();
   await expect(page).toHaveURL(/results\.html$/);
-  await expect(page.locator('#result-profit')).toHaveText('+$9.00');
+  await expect(page.locator('#result-profit')).toHaveText('+$7.00');
   await page.locator('.results-back').click();
   await expect(page.locator('#generate')).toBeVisible();
 });
