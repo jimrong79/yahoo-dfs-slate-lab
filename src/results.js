@@ -82,7 +82,7 @@ async function load() {
     const response=await fetch(url,{cache:'no-store',signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw Error('The weekly report is not available yet. Please try again later.');
     report=validateReport(await response.json());
-    $('results-period').innerHTML=`<option value="last7">Last 7 reported days</option><option value="season">Season to date</option>`+weeklySeries(report).map(w=>`<option value="${w.start}">Week of ${dateLabel(w.start)}</option>`).join('');
+    $('results-period').innerHTML=`<option value="season">Season to date</option><option value="last7">Last 7 reported days</option>`+weeklySeries(report).map(w=>`<option value="${w.start}">Week of ${dateLabel(w.start)}</option>`).join('');
     $('results-through').textContent=`Results through ${dateLabel(report.through)}, ${report.through.slice(0,4)}`;
     $('results-updated').textContent=`Updated ${new Date(report.updatedAt).toLocaleDateString('en-US',{timeZone:'America/Los_Angeles',month:'short',day:'numeric',year:'numeric'})}`;
     $('results-state').hidden=true;$('results-content').hidden=false;render();
