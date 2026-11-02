@@ -451,8 +451,12 @@ def refresh(output, date, contest_id=None):
     published=[]
     if slates or dk:
         urls={'sportsline':'https://www.sportsline.com/nba/expert-projections/simulation/',
-              'fuel':f'https://www.dailyfantasyfuel.com/nba/projections/fanduel/{date}/',
-              'fuel_dk':f'https://www.dailyfantasyfuel.com/nba/projections/draftkings/{date}/',
+              # Live refresh is restricted to today's Eastern date above.
+              # Fuel's dated routes can time out or return a non-projection page
+              # while these canonical current-day pages remain available.
+              # parse_fuel still validates the platform, row dates and timestamp.
+              'fuel':'https://www.dailyfantasyfuel.com/nba/projections/fanduel/',
+              'fuel_dk':'https://www.dailyfantasyfuel.com/nba/projections/draftkings/',
               'starters':'https://www.rotowire.com/basketball/nba-lineups.php'}
         source_errors={}
         with ThreadPoolExecutor(max_workers=5) as executor:
