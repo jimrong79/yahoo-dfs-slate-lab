@@ -7,8 +7,14 @@ export class AccessError extends Error {constructor(message,status,code){super(m
 export const currentSession = () => session && session.expiresAt>Date.now() ? session : null;
 function forget(){session=null;try{sessionStorage.removeItem(SESSION_KEY);}catch{}}
 async function request(path,{method='GET',data,signal,token=currentSession()?.token}={}) {
-  const response=await fetch(`${API_ORIGIN}${path}`,{method,cache:'no-store',credentials:'omit',signal:signal||AbortSignal.timeout(15000),
-    headers:{...(token?{authorization:`Bearer ${token}`} : {}),...(data?{'content-type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{})});
+  let response;
+  try {
+    response=await fetch(`${API_ORIGIN}${path}`,{method,cache:'no-store',credentials:'omit',signal:signal||AbortSignal.timeout(15000),
+      headers:{...(token?{authorization:`Bearer ${token}`} : {}),...(data?{'content-type':'application/json'}:{})},...(data?{body:JSON.stringify(data)}:{})});
+  } catch(error) {
+    if(path==='/api/generate' && (error instanceof TypeError || error.name==='TimeoutError'))throw new AccessError('The lineup service did not respond. Wait a minute, refresh data, and try again.',503,'generation_unreachable');
+    throw error;
+  }
   let result;try{result=await response.json();}catch{throw new AccessError('Sign-in service is unavailable. Please try again.',503,'service_unavailable');}
   if(!response.ok){if(response.status===401||response.status===403)forget();throw new AccessError(result.error||'Request failed.',response.status,result.code);}
   return result;
