@@ -41,6 +41,15 @@ test('expired authorization during generation gives the access popup and no line
   await page.locator('#generate').click();await expect(page.locator('#modal-content')).toContainText('session expired');
   await expect(page.locator('#roster-count')).toHaveText('0 / 8');
 });
+test('a lost generation response provides recovery instructions and keeps sign-in',async({page})=>{
+  await page.route(`${API_ORIGIN}/api/generate`,route=>route.abort('failed'));
+  await page.goto('./');await expect(page.locator('#auth-status')).toContainText('Signed in as jimrong79');
+  await page.locator('#generate').click();
+  await expect(page.locator('#lineup-message')).toContainText('The lineup service did not respond. Wait a minute, refresh data, and try again.');
+  await expect(page.locator('#auth-status')).toContainText('Signed in as jimrong79');
+  await expect(page.locator('#roster-count')).toHaveText('0 / 8');
+  await expect(page.locator('#generate')).toBeEnabled();
+});
 test('sign out removes the lineup and restores the access gate',async({page})=>{
   await page.goto('./');await expect(page.locator('#auth-status')).toContainText('Signed in as jimrong79');
   await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');

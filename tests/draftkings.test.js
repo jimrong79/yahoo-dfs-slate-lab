@@ -39,3 +39,28 @@ test('DraftKings scoring source and salary scale cannot leak into Yahoo',()=>{
   assert.throws(()=>generateLineup({...slate,salaryCap:200},{},now),/salary cap/);
   assert.throws(()=>generateLineup({...slate,platform:'unknown'},{},now),/Unsupported/);
 });
+
+test('position coverage cannot count one dual-position player toward two required slots',()=>{
+  for(const positions of [['PG/SG','PG/SG','SF','SF','PF','PF','C','C'],['PG/SF','SG','SG','PF','PF','C','C','C']]){
+    const slate=draftKingsFixture();slate.players=slate.players.slice(0,8).map((p,i)=>({...p,position:positions[i],salary:3000}));
+    assert.throws(()=>generateLineup(slate,{},now),/No legal lineup/);
+  }
+});
+test('compressed multi-position model agrees with exhaustive rosters across varied eligibility and locks',()=>{
+  let seed=48271;
+  const random=n=>{seed=(seed*16807)%2147483647;return seed%n;};
+  const positions=['PG','SG','SF','PF','C','PG/SG','SG/SF','SF/PF','PF/C','PG/SF'];
+  for(let trial=0;trial<20;trial++){
+    const slate=draftKingsFixture();
+    slate.players.forEach(p=>Object.assign(p,{position:positions[random(positions.length)],salary:3000+random(30)*100,projection:10+random(50),newPlayer:random(5)===0}));
+    const settings={maxNewPlayers:2,locked:trial%2?['900']:[],excluded:trial%3?[]:['911']};
+    let best=-Infinity;
+    function choose(start,picks){
+      if(picks.length===8){try{validateLineup(assignSlots(picks,'draftkings'),settings,'draftkings');best=Math.max(best,picks.reduce((sum,p)=>sum+p.projection,0));}catch{}return;}
+      for(let i=start;i<slate.players.length;i++)choose(i+1,[...picks,slate.players[i]]);
+    }
+    choose(0,[]);
+    if(best===-Infinity)assert.throws(()=>generateLineup(slate,settings,now),/No legal lineup|Not enough eligible/);
+    else assert.equal(generateLineup(slate,settings,now).projection,best);
+  }
+});

@@ -1,4 +1,4 @@
-import solver from 'javascript-lp-solver';
+import { solveLineupModel } from './lineup-solver.js';
 import { platformRules, eligibleSlots, money } from './platforms.js';
 import { selectProjection } from './projections.js';
 import { playerProblem, slateProblem } from './eligibility.js';
@@ -79,7 +79,7 @@ export function generateLineup(slate, settings = {}, now = Date.now()) {
     if (locked.has(p.id)) { constraints[`lock_${i}`] = { equal: 1 }; variables[name][`lock_${i}`] = 1; }
     binaries[name] = 1;
   });
-  const result = solver.Solve({ optimize: 'projection', opType: 'max', constraints, variables, binaries, options: { timeout: 15000, tolerance: 0 } });
+  const result = solveLineupModel({ optimize: 'projection', opType: 'max', constraints, variables, binaries, options: { timeout: 15000, tolerance: 0 } });
   if (!result.feasible) throw new Error('No legal lineup fits these settings. Release a lock, include more players, or increase the new-player limit.');
   const selected = candidates.filter((p, i) => result[`p${i}`] > 0.5);
   const lineup = assignSlots(selected);
@@ -88,24 +88,27 @@ export function generateLineup(slate, settings = {}, now = Date.now()) {
 }
 
 function generateDraftKings(candidates, settings, now) {
-  // A variable represents one player in one eligible slot. Per-player bounds
-  // prevent double-counting a PG/SG (or any other multi-position player).
+  // Select each player once, then assign slots. Hall's matching condition:
+  // every subset of slots must have enough distinct eligible players. Slots
+  // with the same union of base positions share a constraint, reducing the
+  // model to 30 coverage rows instead of symmetric player/slot variables.
   const rules=platformRules('draftkings'), locked=new Set(settings.locked || []);
   if (candidates.some(p=>!p.game) || new Set(candidates.map(p=>p.game)).size<2) throw new Error('Include players from at least two different games.');
-  const constraints={salary:{max:50000},newPlayers:{max:settings.maxNewPlayers ?? 2}},variables={},binaries={};
-  for (const slot of rules.slots) constraints[`slot_${slot}`]={equal:1};
+  const positionBits={PG:1,SG:2,SF:4,PF:8,C:16};
+  const slotMasks=rules.slots.map(slot=>Object.entries(positionBits).reduce((mask,[position,bit])=>mask|(eligibleSlots({position},'draftkings').includes(slot)?bit:0),0));
+  const constraints={salary:{max:50000},total:{equal:8},newPlayers:{max:settings.maxNewPlayers ?? 2}},variables={},binaries={};
+  for(let mask=1;mask<31;mask++)constraints[`coverage_${mask}`]={min:slotMasks.filter(slot=>(slot&mask)===slot).length};
   candidates.forEach((p,i)=>{
-    constraints[`player_${i}`]=locked.has(p.id)?{equal:1}:{max:1};
     constraints[`team_${p.team}`]={max:7}; constraints[`game_${p.game}`]={max:7};
-    for (const slot of eligibleSlots(p,'draftkings')) {
-      const variable=`p${i}_${slot}`;
-      variables[variable]={projection:Math.round(p.projection*1000),salary:p.salary,newPlayers:+p.newPlayer,[`player_${i}`]:1,[`slot_${slot}`]:1,[`team_${p.team}`]:1,[`game_${p.game}`]:1};
-      binaries[variable]=1;
-    }
+    const variable=`p${i}`,positions=p.position.split('/').reduce((mask,pos)=>mask|positionBits[pos],0);
+    variables[variable]={projection:Math.round(p.projection*1000),salary:p.salary,total:1,newPlayers:+p.newPlayer,[`team_${p.team}`]:1,[`game_${p.game}`]:1};
+    for(let mask=1;mask<31;mask++)if(positions&mask)variables[variable][`coverage_${mask}`]=1;
+    if(locked.has(p.id)){constraints[`lock_${i}`]={equal:1};variables[variable][`lock_${i}`]=1;}
+    binaries[variable]=1;
   });
-  const result=solver.Solve({optimize:'projection',opType:'max',constraints,variables,binaries,options:{timeout:15000,tolerance:0}});
+  const result=solveLineupModel({optimize:'projection',opType:'max',constraints,variables,binaries,options:{timeout:15000,tolerance:0,nodeSelection:'hybrid',branching:'pseudocost'}});
   if (!result.feasible) throw new Error('No legal lineup fits these settings. Release a lock, include more players, or increase the new-player limit.');
-  const selected=candidates.filter((p,i)=>rules.slots.some(slot=>result[`p${i}_${slot}`]>0.5));
+  const selected=candidates.filter((p,i)=>result[`p${i}`]>0.5);
   const lineup=assignSlots(selected,'draftkings'); validateLineup(lineup,settings,'draftkings');
   return {lineup,salary:lineup.reduce((n,p)=>n+p.salary,0),projection:lineup.reduce((n,p)=>n+p.projection,0),generatedAt:new Date(now).toISOString(),eligibleCount:candidates.length};
 }
