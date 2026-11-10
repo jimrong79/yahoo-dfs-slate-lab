@@ -95,7 +95,7 @@ test('DraftKings 50/50 and Combined use native forecasts and a separate DK model
   await page.route(`**/data/${dk.date}-${dk.id}.json*`,route=>route.fulfill({json:fixture.slate}));
   await page.route(`**/data/ml-draftkings-${dk.date}.json*`,route=>route.fulfill({json:fixture.model}));
   await page.goto('./?platform=draftkings');
-  await expect(page.locator('#projection-select')).toHaveValue('provider');
+  await expect(page.locator('#projection-select')).toHaveValue('combined');
   await page.locator('#projection-select').selectOption('consensus');
   const both=native.players.find(p=>!chosen.includes(p.id));
   await expect(page.locator(`[data-player-id="${both.id}"] .projection-cell`)).toContainText((both.projection+4).toFixed(1));
@@ -117,7 +117,7 @@ test('DraftKings 50/50 and Combined use native forecasts and a separate DK model
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1)).toBe(true);
   await page.screenshot({path:`screenshots/dk-combined-${testInfo.project.name}.png`,fullPage:true});
   await page.locator('#slate-select').selectOption(main.seriesId);
-  await expect(page.locator('#projection-select')).toHaveValue('consensus');
+  await expect(page.locator('#projection-select')).toHaveValue('combined');
   await page.locator('#slate-select').selectOption(dk.id);
   await expect(page.locator('#projection-select')).toHaveValue('combined');
   await page.locator('#projection-select').selectOption('trained');
@@ -131,11 +131,15 @@ test('copy remains usable when clipboard permission is denied', async ({page}) =
   await page.locator('#copy-lineup').click();
   await expect(page.getByRole('textbox',{name:'Lineup to copy'})).toHaveValue(/Slate Lab.*Yahoo NBA/s);
 });
-test('two-game defaults apply and preserve explicit user settings across refreshes',async({page})=>{
+test('both platforms default to Combined and include bench at 0 minutes, preserving custom settings',async({page})=>{
+  await page.goto('./?platform=yahoo');
+  await expect(page.locator('#projection-select')).toHaveValue('combined');
+  await expect(page.locator('#build-rules')).toContainText('Include bench · 0+');
   await page.goto('./?platform=draftkings');
-  await expect(page.locator('#build-rules')).toContainText('Include bench · 16+');
+  await expect(page.locator('#projection-select')).toHaveValue('combined');
+  await expect(page.locator('#build-rules')).toContainText('Include bench · 0+');
   await page.locator('#settings-button').click();
-  await expect(page.locator('#setting-minutes')).toHaveValue('16');
+  await expect(page.locator('#setting-minutes')).toHaveValue('0');
   await expect(page.locator('#setting-starters')).not.toBeChecked();
   await page.locator('#setting-minutes').selectOption('24');
   await page.locator('#setting-starters').check();
@@ -148,7 +152,8 @@ test('two-game defaults apply and preserve explicit user settings across refresh
 test('trained model is optional, compares totals and labels saved lineups and exports',async({page},testInfo)=>{
   await page.route('**/data/ml-*.json*',route=>route.fulfill({json:modelFixture(yahoo)}));
   await page.goto('./?platform=yahoo');
-  await expect(page.locator('#projection-select')).toHaveValue('consensus');
+  await expect(page.locator('#projection-select')).toHaveValue('combined');
+  await page.locator('#projection-select').selectOption('consensus');
   await expect(page.locator('#projection-status')).toContainText('Model trained through');
   await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
   await expect(page.locator('#projection-comparison')).toContainText('50/50');

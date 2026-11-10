@@ -57,17 +57,17 @@ test('duplicate identities and invalid settings fail before solving', () => {
   assert.throws(()=>generateLineup(slate,{},now),/Duplicate/);
   assert.throws(()=>generateLineup(fixture(),{maxNewPlayers:-1},now),/Invalid build settings/);
 });
-test('two-game defaults admit affordable rotation players without relaxing injury checks', () => {
+test('build defaults admit affordable rotation players without relaxing injury checks', () => {
   const slate=fixture();slate.games=[{id:'a'},{id:'b'}];
   slate.players.forEach(p=>{p.salary=35;});
-  const bench=slate.players.map(p=>({...p,id:`bench-${p.id}`,name:`Bench ${p.id}`,salary:12,minutes:18,starter:false,projection:15}));
+  const bench=slate.players.map(p=>({...p,id:`bench-${p.id}`,name:`Bench ${p.id}`,salary:12,minutes:12,starter:false,projection:15}));
   bench[0].injury='Questionable';bench[0].projection=1000;
   slate.players.push(...bench);
-  const strict=defaultBuildSettings({games:[{},{},{}]});
+  const strict={minMinutes:24,startersOnly:true,maxNewPlayers:2};
   assert.throws(()=>generateLineup(slate,strict,now),/cheapest eight players.*\$280.*\$200/);
   const settings=defaultBuildSettings(slate),result=generateLineup(slate,settings,now);
   assert.equal(validateLineup(result.lineup,settings),true);
   assert.ok(result.lineup.some(p=>!p.starter));
-  assert.ok(result.lineup.every(p=>p.injury!=='Questionable'&&p.minutes>=16));
+  assert.ok(result.lineup.every(p=>p.injury!=='Questionable'));
   assert.throws(()=>generateLineup(slate,strict,now),/No legal lineup/);
 });

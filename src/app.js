@@ -17,7 +17,7 @@ const time = value => new Date(value).toLocaleTimeString('en-US', { timeZone: 'A
 const dateLabel = value => new Date(`${value}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric' });
 const readSaved = () => { try { const data = JSON.parse(localStorage.getItem('slatelab-lineups-v1') || '[]'); return Array.isArray(data) ? data.slice(0, 30) : []; } catch { return []; } };
 const state = { catalog: null, slate: null, loading: false, busy: false, locked: new Set(), excluded: new Set(), result: null, game: 'ALL', position: 'ALL', sort: 'projection', direction: -1, settings: defaultBuildSettings(), settingsCustomized: false };
-Object.assign(state, {baseSlate:null,modelSnapshot:null,projectionMethod:'consensus',projectionMethods:{yahoo:'consensus',draftkings:'provider'}});
+Object.assign(state, {baseSlate:null,modelSnapshot:null,projectionMethod:'combined',projectionMethods:{yahoo:'combined',draftkings:'combined'}});
 let toastTimer, buildController, generation = 0, loadGeneration = 0;
 let authReady=false;
 const rules = () => platformRules(state.slate);
@@ -44,7 +44,7 @@ function showModal(title, html) {
 }
 function updateStatus() {
   if (state.baseSlate) state.slate = selectProjection(state.baseSlate, state.modelSnapshot, state.projectionMethod);
-  $('app').dataset.projection = state.slate?.projectionMethod || 'consensus';
+  $('app').dataset.projection = state.slate?.projectionMethod || 'combined';
   const problem = slateProblem(state.slate);
   const failed = state.catalog?.status === 'refresh_failed' || state.catalog?.platformErrors?.[rules().id];
   const feedFailure = state.slate?.sourceHealth?.status === 'unavailable' ? state.slate.sourceHealth.message : '';
@@ -53,8 +53,9 @@ function updateStatus() {
   $('snapshot-help').hidden = !(/snapshot|official injury report|automatic refresh|feed unavailable/.test(warning) && !/trained-model/.test(warning));
   const hasSlate = !!state.slate;
   $('projection-controls').hidden = !hasSlate;
-  const methods = rules().id === 'draftkings' ? [['provider','Fuel DraftKings (original default)']] : [];
-  methods.push(['consensus',`50/50 consensus${rules().id === 'yahoo' ? ' (default)' : ''}`],['combined','Combined'],['market','3-source blend (experimental)'],['hybrid','Betting hybrid (experimental)'],['trained','Trained model (experimental)']);
+  const methods = [['combined','Combined (default)'],['consensus','50/50 consensus']];
+  if (rules().id === 'draftkings') methods.push(['provider','Fuel DraftKings (original)']);
+  methods.push(['market','3-source blend (experimental)'],['hybrid','Betting hybrid (experimental)'],['trained','Trained model (experimental)']);
   $('projection-select').innerHTML = methods.map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
   $('projection-select').disabled = state.loading;
   $('projection-select').value = state.projectionMethod;
@@ -143,7 +144,7 @@ async function loadData(id = state.slate?.id) {
     state.projectionMethod = state.projectionMethods[platformRules(slate).id];
     state.slate = selectProjection(slate,modelSnapshot,state.projectionMethod); $('slate-select').value = slate.id;
     if (changed) { state.locked.clear(); state.excluded.clear(); state.game = state.position = 'ALL'; $('search').value=''; }
-    if (!state.settingsCustomized) state.settings = defaultBuildSettings(slate);
+    if (!state.settingsCustomized) state.settings = defaultBuildSettings();
     if (!state.slate.players.some(p=>!problemForPlayer(p))) $('eligible-only').checked=false;
     $('date-label').textContent = dateLabel(slate.date);
     const platform=rules(); $('app').dataset.platform=platform.id;
@@ -265,13 +266,13 @@ function method() {
     : 'Points + 1.2 × rebounds + 1.5 × assists + 3 × steals + 3 × blocks − turnovers.';
   const poolRule='50/50 requires both current provider forecasts. Combined averages both when available, uses the sole provider when only one is available, and uses a fresh model prediction for the selected platform when neither is available. '+(dk ? 'DraftKings requires at least two games and supports multiple positions, with each player selected once.' : 'Yahoo requires at least three teams.');
   showModal('A transparent starting point', `<p>${description}</p><p>${scoring} Value means fantasy points per ${dk ? '$1,000' : '$1'} of salary.</p>
-    <p>Yahoo defaults to 50/50; DraftKings keeps Fuel as its original default. Combined shows the source below each forecast and uses model minutes when necessary. Missing minutes still exclude a player. Trained predictions are experimental and use separately fitted Yahoo or DraftKings scoring targets. Only derived forecasts are published; models and training data stay private. Profitability has not been validated.</p>
+    <p>Yahoo and DraftKings default to Combined. Combined shows the source below each forecast and uses model minutes when necessary. Missing minutes still exclude a player. Trained predictions are experimental and use separately fitted Yahoo or DraftKings scoring targets. Only derived forecasts are published; models and training data stay private. Profitability has not been validated.</p>
     <p>SportsLine and Fuel are projection providers. 3-source blend adds an optional direct player-prop feed from The Odds API. Missing forecasts can reflect provider coverage, publication timing, or a failed player/matchup match; they do not establish that a player will receive few minutes.</p>
     <p>3-source blend averages whichever of SportsLine, Fuel, and Betting have a valid forecast: three sources get one-third each, two get half each, and one is used alone. If none are available, the player has no forecast. Betting estimates are experimental: published stat lines are used directly as approximations, then scored for the selected platform. DD/TD probabilities use margin-adjusted Yes/No odds when both are available, or implied probabilities from Yes-only odds with the bookmaker margin still included. A complete betting estimate requires all stats from at least one bookmaker; DraftKings also requires double-double and triple-double probabilities. We prefer the median of these complete bookmaker forecasts. Otherwise, fresh betting categories replace matching SportsLine contributions to form a Betting (provider-filled) estimate. This is added alongside the original SportsLine and Fuel forecasts, each with equal weight. Missing categories share SportsLine inputs, so these are not three independent forecasts. Missing or unusable markets stay unavailable, never zero. If no fresh betting category is usable, no third estimate is added. Stat sources shows which categories were filled. Quotes expire after two hours. 3-source blend can use fresh model minutes when needed, but does not use model points.</p>
     <p>A higher forecast does not establish better accuracy. Model inputs expire after two hours; roster, injury or starter changes invalidate that matchup’s predictions. A new private export is required to refresh them. The public refresh workflow does not run or retrain either private model.</p>
     <p>Betting hybrid is a separate option. It replaces available SportsLine stat contributions with betting estimates, and retains SportsLine for missing categories. The result replaces SportsLine in its blend with Fuel; SportsLine is not counted again as a third source. Each category uses the median of its valid bookmaker estimates. DraftKings 3PM + DD/TD remain one group: all three markets must be available at a bookmaker to replace the provider group. If matching provider components or fresh betting components are unavailable, the original provider totals are used. Individual quote timestamps are preserved and expire after two hours. Stat sources shows which contributions were used. Hybrid does not use model points; model minutes may be used when needed.</p>
     <h3>Who can enter a lineup?</h3><p>Players must meet your minutes and starter filters and have no unresolved injury flag. Official team injury reports must be submitted. ${poolRule}</p>
-    <p>Two-game slates default to including healthy bench players with 16+ projected minutes, so cheaper rotation players can fit the budget. Larger slates default to starters with 24+ minutes. Your custom settings are kept when switching slates.</p>
+    <p>All Yahoo and DraftKings slates default to 0+ projected minutes with healthy bench players included. Your custom settings are kept when switching slates.</p>
     <p>“NEW” means the selected platform’s historical average is zero, including rookies or missing history. At most two are selected by default. Eight players and a ${money(platform.salaryCap)} cap are enforced.</p>
     <p>Game chips, positions, and search filter the table only. Locks, exclusions, and Settings affect generation. Switching slates clears locks and exclusions.</p>
     <h3>Freshness and lineup locks</h3><p>Checks run every 15 minutes and can be delayed. Refresh data reloads the latest published snapshot. Salaries can arrive before forecasts, minutes, or injury reports. Generation stops if the snapshot is over two hours old, the injury report is over three hours old, or the slate has started. Existing entries and late swaps are not managed.</p>
