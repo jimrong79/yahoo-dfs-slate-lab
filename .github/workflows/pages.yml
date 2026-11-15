@@ -11,6 +11,8 @@ on:
     secrets:
       ODDS_API_KEY:
         required: false
+      FUEL_COOKIE:
+        required: false
   schedule:
     - cron: '7,22,37,52 * * * *'
 
@@ -53,6 +55,7 @@ jobs:
         run: |
           npm test
           python -m pytest tests/test_pipeline.py -q
+          python -m pytest tests/test_fuel_access.py -q
           python -m pytest tests/test_betting.py -q
           python -m pytest tests/test_hybrid.py -q
           python -m pytest tests/test_odds_gate.py -q
@@ -61,6 +64,8 @@ jobs:
         run: python pipeline/restore_published.py
       - name: Discover current slates and refresh public inputs
         env:
+          # Fuel-only session; never passed to the frontend build or artifacts.
+          FUEL_COOKIE: ${{ secrets.FUEL_COOKIE }}
           # Ordinary manual, scheduled, and push runs never receive the key.
           ODDS_API_KEY: ${{ steps.odds_gate.outputs.enabled == 'true' && secrets.ODDS_API_KEY || '' }}
           ODDS_FETCH_ENABLED: ${{ steps.odds_gate.outputs.enabled || 'false' }}

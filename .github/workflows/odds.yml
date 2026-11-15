@@ -21,3 +21,4 @@ jobs:
       fetch_odds: true
     secrets:
       ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+      FUEL_COOKIE: ${{ secrets.FUEL_COOKIE }}

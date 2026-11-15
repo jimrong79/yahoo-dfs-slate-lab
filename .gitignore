@@ -12,3 +12,6 @@ screenshots/
 
 # Personal contest history and local performance reports.
 /contest-history/
+
+# Local provider exports used to validate authenticated feed coverage.
+/DFF_*.csv

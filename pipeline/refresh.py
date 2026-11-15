@@ -1,4 +1,4 @@
-"""Public, read-only daily slate publishing. No Yahoo account or entry access.
+"""Read-only daily slate publishing. No Yahoo account or entry access.
 
 The private research ML model is deliberately not promoted by this publisher.
 Version 1 reproduces the reviewed live-consensus projection recipe.
@@ -23,8 +23,10 @@ from bs4 import BeautifulSoup
 import pdfplumber
 try:
     from .betting import BettingFeed, WEIGHTS
+    from .fuel_access import FUEL_URLS, session_cookie, coverage_metadata, write_coverage_summary
 except ImportError:  # python pipeline/refresh.py
     from betting import BettingFeed, WEIGHTS
+    from fuel_access import FUEL_URLS, session_cookie, coverage_metadata, write_coverage_summary
 
 ROOT = Path(__file__).resolve().parents[1]
 EASTERN = ZoneInfo('America/New_York')
@@ -53,19 +55,37 @@ def iso(value):
 
 def fetch(url):
     # DraftKings' public feeds accept the library's normal python-requests
-    # identification. No browser impersonation, session cookies, or login.
+    # identification. The optional Fuel cookie is scoped to its two feeds.
     headers={} if urlparse(url).hostname in {'api.draftkings.com','www.draftkings.com'} else {'User-Agent':'SlateLab/1.0 public NBA slate research'}
+    cookie = session_cookie(url)
+    request_headers = {**headers, 'Cookie': cookie} if cookie else headers
+    options = {'allow_redirects': False} if cookie else {}
     for attempt in range(3):
         try:
-            response = requests.get(url, timeout=(10, 30), headers=headers)
+            response = requests.get(url, timeout=(10, 30), headers=request_headers, **options)
+            if cookie and (300 <= response.status_code < 400 or response.status_code in {401, 403}):
+                # An expired Fuel session may redirect to Google/Cognito.
+                # Never forward the cookie or follow that login flow. Recover
+                # the public preview, whose restriction is reported below.
+                response = requests.get(url, timeout=(10, 30), headers=headers, allow_redirects=False)
+                if 300 <= response.status_code < 400:
+                    raise ValueError('Fuel redirected to sign-in; renew FUEL_COOKIE.')
             response.raise_for_status()
             return response
         except (requests.Timeout, requests.ConnectionError):
             if attempt == 2:
+                if cookie:
+                    raise ValueError('Fuel request failed after three connection attempts.') from None
                 raise
         except requests.HTTPError as exc:
             if attempt == 2 or exc.response.status_code not in {429, 500, 502, 503, 504}:
+                if cookie:
+                    raise ValueError(f'Fuel request failed (HTTP {exc.response.status_code}).') from None
                 raise
+        except requests.RequestException:
+            if cookie:
+                raise ValueError('Fuel request failed; check the FUEL_COOKIE secret.') from None
+            raise
         time.sleep(attempt + 1)
 
 
@@ -455,8 +475,7 @@ def refresh(output, date, contest_id=None):
               # Fuel's dated routes can time out or return a non-projection page
               # while these canonical current-day pages remain available.
               # parse_fuel still validates the platform, row dates and timestamp.
-              'fuel':'https://www.dailyfantasyfuel.com/nba/projections/fanduel/',
-              'fuel_dk':'https://www.dailyfantasyfuel.com/nba/projections/draftkings/',
+              **FUEL_URLS,
               'starters':'https://www.rotowire.com/basketball/nba-lineups.php'}
         source_errors={}
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -483,6 +502,9 @@ def refresh(output, date, contest_id=None):
         source_info={k:{'url':u,'capturedAt':iso(now)} for k,u in urls.items()}
         source_info['fuel']['updatedAt']=fuel_updated
         source_info['fuel_dk']['updatedAt']=fuel_dk_updated
+        for name, values in [('fuel', fuel), ('fuel_dk', fuel_dk)]:
+            source_info[name].update(coverage_metadata(html.get(name, ''), len(values), name in source_errors))
+        write_coverage_summary(source_info)
         source_info['sportsline']['updatedAt']=None
         source_info['injuries']={'url':injury_url,'updatedAt':reported,'capturedAt':iso(now)}
         def publish(slate,meta,filename):
