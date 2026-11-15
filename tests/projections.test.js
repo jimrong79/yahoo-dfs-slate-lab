@@ -53,6 +53,33 @@ test('missing comparison values do not masquerade as zero totals',()=>{
   assert.deepEqual(comparisonTotals([{consensusProjection:20,modelProjection:null}]),{consensus:20,trained:null});
 });
 
+test('Yahoo trained lineups use model points and minutes without requiring provider forecasts',()=>{
+  const base=structuredClone(slate), predictions=modelFixture(base).players;
+  base.ready=base.consensusReady=false;base.combinedReady=true;
+  for(const p of base.players){
+    p.providerFlagsClear=p.providerClear;
+    p.providerClear=false;p.sources={sportsline:null,fuel:null};p.sourceCount=0;
+    p.projection=null;p.minutes=null;
+  }
+  const model={...modelFixture(base),players:predictions};
+  const settings={minMinutes:0,startersOnly:false,maxNewPlayers:2};
+  const selected=selectProjection(base,model,'trained',now);
+  const result=generateLineup(selected,settings,now);
+  assert.equal(result.lineup.length,8);assert.ok(result.salary<=200);
+  assert.ok(result.lineup.every(p=>p.projection===p.modelProjection && p.minutes===p.modelMinutes && p.minutesSource==='model'));
+  assert.ok(result.lineup.every(p=>p.providerFlagsClear && !p.providerClear && p.sourceCount===0));
+  assert.equal(selectProjection(base,model,'consensus',now).ready,false);
+  const player=result.lineup[0];
+  for(const injury of ['Out','Doubtful','Questionable','Unknown'])assert.ok(playerProblem({...player,injury},settings));
+  assert.match(playerProblem({...player,providerFlagsClear:false},settings),/provider injury flag/);
+  assert.match(playerProblem({...player,providerFlagsClear:undefined},settings),/provider injury flag/);
+  assert.match(playerProblem({...player,modelAvailable:false},settings),/matching trained-model/);
+  const noMinutes=structuredClone(model);noMinutes.players.find(p=>p.id===player.id).minutes=null;
+  assert.ok(trainedProblem(base,noMinutes,now));
+  const pending=selectProjection({...base,combinedReady:false,readinessReason:'Official injury reports pending'},model,'trained',now);
+  assert.match(slateProblem(pending,now),/Official injury reports pending/);
+});
+
 const fallbackIds=generateLineup(slate,{},now).lineup.slice(0,3).map(p=>p.id);
 test('Combined uses both, sole provider, then model, and preserves original consensus',()=>{
   const {slate:base,model}=combinedFixture(slate,fallbackIds);

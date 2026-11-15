@@ -67,7 +67,7 @@ export function selectProjection(slate, snapshot, method, now = Date.now()) {
     // with a more optimistic model prediction.
     const combinedSource = sportsline !== null && fuel !== null ? 'consensus' : sportsline !== null ? 'sportsline' : fuel !== null ? 'fuel' : modelAvailable ? 'model' : 'unavailable';
     const combinedProjection = combinedSource === 'consensus' ? forecast(consensusProjection) ? consensusProjection : Math.round((sportsline+fuel)/2*1000)/1000 : sportsline ?? fuel ?? modelProjection;
-    const useModelMinutes = (method === 'combined' && (combinedSource === 'model' || !validMinutes(sportslineMinutes))) || (['market','hybrid'].includes(method) && !validMinutes(sportslineMinutes)) || (platform === 'draftkings' && method === 'trained');
+    const useModelMinutes = (method === 'combined' && (combinedSource === 'model' || !validMinutes(sportslineMinutes))) || (['market','hybrid'].includes(method) && !validMinutes(sportslineMinutes)) || method === 'trained';
     const minutes = useModelMinutes ? modelMinutes : sportslineMinutes;
     return {...p, consensusProjection, combinedProjection, combinedSource, marketProjection, blendSources, bettingProjection:betting, marketBettingProjection, marketBettingSource, hybridDetails, hybridSources, hybridProjection, modelProjection, modelMinutes, sportslineMinutes,
       modelAvailable, projectionMethod:method,
@@ -81,7 +81,7 @@ export function selectProjection(slate, snapshot, method, now = Date.now()) {
   const enoughMarket = players.filter(p=>forecast(p.marketProjection) && p.marketProjection > 0).length >= 8;
   const enoughHybrid = players.filter(p=>forecast(p.hybridProjection) && p.hybridProjection > 0).length >= 8;
   const consensusReady=slate.consensusReady ?? (slate.ready && players.filter(p=>forecast(p.consensusProjection)).length>=8);
-  const readiness=method === 'hybrid' ? combinedReady && enoughHybrid : method === 'market' ? combinedReady && enoughMarket : method === 'combined' ? combinedReady && enoughCombined : platform === 'draftkings' && method === 'trained' ? combinedReady : method === 'consensus' ? consensusReady : slate.ready;
+  const readiness=method === 'hybrid' ? combinedReady && enoughHybrid : method === 'market' ? combinedReady && enoughMarket : method === 'combined' ? combinedReady && enoughCombined : method === 'trained' ? combinedReady : method === 'consensus' ? consensusReady : slate.ready;
   return {...slate,players,projectionMethod:method,trainedSnapshot:snapshot,
     combinedReady,consensusReady,ready:readiness,
     readinessReason:method === 'hybrid' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughHybrid ? 'Betting hybrid needs at least eight available provider or hybrid forecasts.' : null : method === 'market' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughMarket ? '3-source blend needs at least eight available forecasts.' : null : method === 'combined' ? !combinedReady ? slate.combinedReadinessReason || slate.readinessReason : !enoughCombined ? 'Combined needs at least eight current forecasts from providers or a fresh trained-model export.' : null : method === 'consensus' && !consensusReady ? slate.readinessReason || 'Waiting for both current projection sources.' : slate.readinessReason,
