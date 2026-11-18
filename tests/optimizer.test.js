@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { generateLineup, validateLineup, slateProblem, playerProblem, assignSlots } from '../src/optimizer.js';
 import { defaultBuildSettings } from '../src/build-settings.js';
 
@@ -39,6 +40,19 @@ test('three teams are enforced even when two teams dominate forecasts', () => {
   const result=generateLineup(slate,{},now);
   assert.equal(new Set(result.lineup.map(p=>p.team)).size,3);
   assert.ok(result.lineup.some(p=>p.id==='11'));
+});
+test('full 12-game Yahoo pool solves exactly with bench enabled and a frozen Workers clock', () => {
+  const slate=JSON.parse(readFileSync(new URL('./fixtures/yahoo-large-pool.json',import.meta.url),'utf8'));
+  const original=Date.now,clock=Date.parse(slate.updatedAt)+1000;
+  Date.now=()=>clock;
+  try {
+    const result=generateLineup(slate,{startersOnly:false,minMinutes:0},clock);
+    assert.equal(result.eligibleCount,308);
+    assert.equal(result.salary,200);
+    // Independently certified by SciPy/HiGHS using all team-pair constraints.
+    assert.equal(result.lineup.reduce((n,p)=>n+Math.round(p.projection*1000),0),308075);
+    assert.equal(validateLineup(result.lineup),true);
+  } finally { Date.now=original; }
 });
 test('stale, archived, started, future or invalid timestamps block generation', () => {
   for (const change of [{updatedAt:'2026-10-21T14:00:00Z'},{date:'2026-10-20'},{firstTip:'2026-10-21T16:00:00Z'},{updatedAt:'2026-10-21T19:00:00Z'},{firstTip:'bad'},{injuryReportedAt:'2026-10-21T14:00:00Z'},{injuryReportedAt:'2026-10-21T20:00:00Z'},{ready:false}]) {

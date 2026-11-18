@@ -62,26 +62,35 @@ export function generateLineup(slate, settings = {}, now = Date.now()) {
   const teams = [...new Set(candidates.map(p => p.team))].sort();
   if (teams.length < rules.minTeams) throw new Error(`Include players from at least ${rules.minTeams} teams.`);
   if (rules.id === 'draftkings') return generateDraftKings(candidates, settings, now);
+  // Give the integer search a stable order with high-point options first.
+  candidates.sort((a,b) => b.projection-a.projection || a.salary-b.salary || a.id.localeCompare(b.id));
   const constraints = { salary: { max: 200 }, total: { equal: 8 }, newPlayers: { max: settings.maxNewPlayers ?? 2 }, guards: { min: 3 }, forwards: { min: 3 } };
   for (const pos of ['PG', 'SG', 'SF', 'PF', 'C']) constraints[pos] = { min: 1 };
   for (const t of teams) constraints[`team_${t}`] = { max: 6 };
-  // No two teams may account for all eight players.
-  const pairs = [];
-  for (let i = 0; i < teams.length; i++) for (let j = i + 1; j < teams.length; j++) {
-    const name = `pair_${i}_${j}`; constraints[name] = { max: 7 }; pairs.push({ name, teams: [teams[i], teams[j]] });
-  }
   const variables = {}, binaries = {};
   candidates.forEach((p, i) => {
     const name = `p${i}`;
     variables[name] = { projection: Math.round(p.projection * 1000), salary: p.salary, total: 1, newPlayers: +p.newPlayer,
       [p.position]: 1, guards: +['PG', 'SG'].includes(p.position), forwards: +['SF', 'PF'].includes(p.position), [`team_${p.team}`]: 1 };
-    for (const pair of pairs) if (pair.teams.includes(p.team)) variables[name][pair.name] = 1;
     if (locked.has(p.id)) { constraints[`lock_${i}`] = { equal: 1 }; variables[name][`lock_${i}`] = 1; }
     binaries[name] = 1;
   });
-  const result = solveLineupModel({ optimize: 'projection', opType: 'max', constraints, variables, binaries, options: { timeout: 15000, tolerance: 0 } });
-  if (!result.feasible) throw new Error('No legal lineup fits these settings. Release a lock, include more players, or increase the new-player limit.');
-  const selected = candidates.filter((p, i) => result[`p${i}`] > 0.5);
+  // Add team-pair restrictions only when an optimal solution violates them.
+  // Once a relaxed optimum uses three teams, it is also optimal for the full
+  // rules. Each cut excludes the entire offending two-team combination.
+  // All passes share the same work budget, including under a frozen clock.
+  const budget = { remaining: 2_000_000_000 };
+  let selected;
+  for (let pass = 0; ; pass++) {
+    const result = solveLineupModel({ optimize: 'projection', opType: 'max', constraints, variables, binaries, options: { timeout: 15000, tolerance: 0, nodeSelection: 'hybrid', branching: 'pseudocost' } }, { budget });
+    if (!result.feasible) throw new Error('No legal lineup fits these settings. Release a lock, include more players, or increase the new-player limit.');
+    selected = candidates.filter((p, i) => result[`p${i}`] > 0.5);
+    const selectedTeams = new Set(selected.map(p => p.team));
+    if (selectedTeams.size >= rules.minTeams) break;
+    const cut = `pair_${pass}`;
+    constraints[cut] = { max: 7 };
+    candidates.forEach((p, i) => { if (selectedTeams.has(p.team)) variables[`p${i}`][cut] = 1; });
+  }
   const lineup = assignSlots(selected);
   validateLineup(lineup, settings);
   return { lineup, salary: lineup.reduce((n, p) => n + p.salary, 0), projection: lineup.reduce((n, p) => n + p.projection, 0), generatedAt: new Date(now).toISOString(), eligibleCount: candidates.length };

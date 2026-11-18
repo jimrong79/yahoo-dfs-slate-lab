@@ -10,3 +10,11 @@ test('search work is bounded even when the Workers clock is frozen, without pois
     assert.equal(result.feasible,true);assert.equal(result.b,1);assert.equal(result.result,5);
   }finally{Date.now=original;}
 });
+test('multiple cut passes consume one shared work budget',()=>{
+  const budget={remaining:10000};
+  assert.equal(solveLineupModel(model,{budget}).feasible,true);
+  assert.ok(budget.remaining<10000);
+  budget.remaining=0;
+  assert.throws(()=>solveLineupModel(model,{budget}),e=>e.code==='solver_limit');
+  assert.equal(solveLineupModel(model).feasible,true);
+});
