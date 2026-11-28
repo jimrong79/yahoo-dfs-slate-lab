@@ -39,8 +39,13 @@ export function playerProblem(p, settings = {}, platform = 'yahoo') {
   const providerClear = ['combined','market','hybrid','trained'].includes(p.projectionMethod) ? p.providerFlagsClear ?? p.providerClear : p.providerClear;
   if (!providerClear) return 'Unresolved provider injury flag';
   if (settings.startersOnly !== false && !p.starter) return 'Outside projected starting five';
-  if (!Number.isFinite(p.minutes)) return 'Awaiting projected minutes';
-  if (p.minutes < (settings.minMinutes ?? 24)) return 'Below minutes minimum';
+  const minimumMinutes = settings.minMinutes ?? 24;
+  // A provider's point projection can stand on its own when Combined's
+  // minutes filter is disabled. Keep missing minutes unknown, never zero.
+  const optionalMinutes = minimumMinutes === 0 && p.minutes == null &&
+    p.projectionMethod === 'combined' && ['consensus','sportsline','fuel'].includes(p.projectionSource);
+  if (!Number.isFinite(p.minutes) && !optionalMinutes) return 'Awaiting projected minutes';
+  if (Number.isFinite(p.minutes) && p.minutes < minimumMinutes) return 'Below minutes minimum';
   if (!eligibleSlots(p, rules.id).length || !Number.isInteger(p.salary) || p.salary < rules.minSalary || p.salary > rules.salaryCap) return `Invalid ${rules.name} salary or position`;
   return null;
 }

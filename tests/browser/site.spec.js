@@ -149,6 +149,31 @@ test('both platforms default to Combined and include bench at 0 minutes, preserv
   await page.locator('#slate-select').selectOption(main.seriesId);
   await expect(page.locator('#build-rules')).toContainText('Starters · 24+');
 });
+for(const platform of ['yahoo','draftkings'])test(`${platform} Combined includes Fuel-only players with unknown minutes at zero minimum`,async({page},testInfo)=>{
+  const base=structuredClone(platform==='yahoo'?yahoo:dk),stamp=Date.parse(base.updatedAt)+30000;
+  base.combinedReady=true;
+  const id=generateLineup(base,{},stamp).lineup[0].id,player=base.players.find(p=>p.id===id);
+  Object.assign(player,{sources:{sportsline:null,fuel:1000},projection:null,consensusProjection:null,
+    minutes:null,sourceCount:1,providerFlagsClear:true,starter:false});
+  await page.route(`**/data/${base.date}-${base.id}.json*`,route=>route.fulfill({json:base}));
+  await page.goto(`./?platform=${platform}`);
+  const row=page.locator(`[data-player-id="${id}"]`);
+  await expect(row.locator('[data-lock]')).toBeEnabled();
+  await expect(row.locator('td').nth(4)).toHaveText('—');
+  await expect(row.locator('.alt-projection')).toContainText('Fuel');
+  await page.locator('#generate').click();await expect(page.locator('#roster-count')).toHaveText('8 / 8');
+  await expect(page.locator('.lineup-player').filter({hasText:player.name})).toHaveCount(1);
+  const download=page.waitForEvent('download');await page.locator('#download-lineup').click();
+  const csv=readFileSync(await (await download).path(),'utf8');
+  expect(csv.split('\n').find(line=>line.includes(`"${player.name}"`))).toContain('"Fuel","","unavailable"');
+  await page.locator('#settings-button').click();
+  await expect(page.locator('#modal-content')).toContainText('0+ allows provider projections with unknown minutes');
+  await page.screenshot({path:`screenshots/unknown-minutes-${platform}-${testInfo.project.name}.png`,fullPage:true});
+  await page.locator('#setting-minutes').selectOption('16');await page.locator('#apply-settings').click();
+  await page.locator('#eligible-only').uncheck();
+  await expect(row.locator('[data-lock]')).toBeDisabled();
+  await expect(row).toHaveAttribute('title','Awaiting projected minutes');
+});
 test('trained model is optional, compares totals and labels saved lineups and exports',async({page},testInfo)=>{
   await page.route('**/data/ml-*.json*',route=>route.fulfill({json:modelFixture(yahoo)}));
   await page.goto('./?platform=yahoo');

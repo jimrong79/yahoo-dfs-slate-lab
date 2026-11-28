@@ -112,9 +112,35 @@ test('Combined keeps providers usable without ML but never invents missing minut
   const rows=fallbackIds.map(id=>selected.players.find(p=>p.id===id));
   assert.equal(playerProblem(rows[0]),null);
   assert.equal(rows[1].projectionSource,'fuel');
-  assert.match(playerProblem(rows[1],{minMinutes:0}),/Awaiting projected minutes/);
+  assert.equal(playerProblem(rows[1],{minMinutes:0}),null);
+  assert.equal(rows[1].minutes,null);assert.equal(rows[1].minutesSource,'unavailable');
+  assert.match(playerProblem(rows[1],{minMinutes:16}),/Awaiting projected minutes/);
   assert.equal(rows[2].projection,null);assert.ok(playerProblem(rows[2]));
   assert.equal(slateProblem(selected,now),null);
+});
+test('Combined can select Fuel-only players without a model when the minutes filter is off, on both platforms',()=>{
+  for(const original of [slate,draftKingsFixture()]){
+    const base=structuredClone(original),stamp=Date.parse(base.updatedAt)+30000,platform=base.platform||'yahoo';
+    base.combinedReady=true;
+    const id=generateLineup(base,{},stamp).lineup[0].id;
+    const player=base.players.find(p=>p.id===id);
+    Object.assign(player,{sources:{sportsline:null,fuel:1000},projection:null,consensusProjection:null,
+      minutes:null,sourceCount:1,providerFlagsClear:true,starter:false});
+    const selected=selectProjection(base,null,'combined',stamp),settings={minMinutes:0,startersOnly:false};
+    const result=generateLineup(selected,settings,stamp),row=result.lineup.find(p=>p.id===id);
+    assert.ok(row,'Fuel-only player should compete without a lock or a shortage of other forecasts');
+    assert.equal(row.projection,1000);assert.equal(row.projectionSource,'fuel');
+    assert.equal(row.minutes,null);assert.equal(row.minutesSource,'unavailable');
+    assert.equal(lineupModelProblem(selected,result.lineup,stamp),null);
+    assert.throws(()=>generateLineup(selected,{...settings,minMinutes:16,locked:[id]},stamp),/Awaiting projected minutes/);
+    assert.throws(()=>generateLineup(selected,{...settings,startersOnly:true,locked:[id]},stamp),/Outside projected starting five/);
+    for(const injury of ['Out','Doubtful','Questionable','Unknown'])assert.ok(playerProblem({...row,injury},settings,platform));
+    assert.match(playerProblem({...row,providerFlagsClear:false},settings,platform),/injury flag/);
+    for(const minutes of [NaN,Infinity,'30'])assert.match(playerProblem({...row,minutes},settings,platform),/Awaiting projected minutes/);
+    for(const projection of [0,null])assert.ok(playerProblem({...row,projection},settings,platform));
+    assert.ok(playerProblem({...row,projectionMethod:'trained',modelAvailable:false},settings,platform));
+    assert.ok(playerProblem({...row,projectionMethod:'consensus'},settings,platform));
+  }
 });
 test('Combined excludes stale models at build time and invalidates lineups that used model minutes',()=>{
   const {slate:base,model}=combinedFixture(slate,fallbackIds);
